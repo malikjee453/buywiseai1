@@ -30,7 +30,7 @@ from buywise.rag.retriever import HybridRetriever
 from buywise.schemas import Listing, QueryPlan, RawResult
 from buywise.utils.currency import convert
 from buywise.utils.meta_fetch import collection_handle, fetch_collection_products, fetch_product_meta_ex
-from buywise.utils.relevance import gender_conflict, is_accessory, title_matches_model
+from buywise.utils.relevance import gender_conflict, is_accessory, judge_query, title_matches_model
 from buywise.utils.url_utils import dedupe, is_foreign_storefront, is_product_url, is_rankable
 
 
@@ -49,6 +49,8 @@ class State(TypedDict, total=False):
     meta_fetched: list
     robots_blocked: list
     last_count: int
+    best_selected: list
+    best_status: dict
     stalled: bool
     expanded: list
     no_providers: bool
@@ -232,7 +234,7 @@ def n_verify(state: State) -> dict:
     s, plan = _settings(state), QueryPlan(**state["plan"])
     valid, drops, samples = verify_listings(_pool(state), s, plan)
     judged_titles: list = []
-    valid, n_judged = judge_relevance(valid, plan.original, LLM(temperature=0.0))
+    valid, n_judged = judge_relevance(valid, judge_query(plan.original), LLM(temperature=0.0))
     if n_judged:
         drops["llm_wrong_product_type"] = n_judged
         judged_titles = getattr(judge_relevance, "last_dropped", [])[:4]
@@ -251,6 +253,12 @@ def n_verify(state: State) -> dict:
             trace.append(f"   per-platform cap relaxed to {s.per_platform_cap + 1} to reach more results")
     if n_judged and judged_titles:
         trace.append("   e.g. llm_wrong_product_type: " + " | ".join(judged_titles))
+    best, bstat = state.get("best_selected"), state.get("best_status")
+    if best and bstat and (status["count"], status["platforms"]) < (bstat["count"], bstat["platforms"]):
+        selected = [Listing(**d) for d in best]          # LLM judging is noisy: keep the best set seen so far
+        trace.append(f"   this round gave fewer results ({status['count']} from {status['platforms']} platforms): "
+                     f"keeping the better set from an earlier round ({bstat['count']} from {bstat['platforms']})")
+        status = bstat
     for l in selected:
         trace.append(f"   \u2713 {l.source}: Rs {l.price_pkr or 0:,.0f} (listed {l.price} {l.currency}, source={l.price_origin}) {l.url[:90]}")
     trace.append(f"[Coverage controller] {status['count']}/{s.target_results} results from "
@@ -259,6 +267,7 @@ def n_verify(state: State) -> dict:
     if stalled and not status["ok"]:
         trace.append("   no new verified results this round: stopping early instead of searching again")
     return {"selected": [l.model_dump() for l in selected], "status": status, "last_count": status["count"],
+            "best_selected": [l.model_dump() for l in selected], "best_status": status,
             "stalled": stalled, "trace": trace}
 
 

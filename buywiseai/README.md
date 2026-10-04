@@ -4,7 +4,7 @@ Multi-agent, RAG-powered price comparison for **Pakistan** (+ AliExpress). Type 
 from different stores, each with price, source and a direct URL, plus an AI "best buy" summary.
 
 - **LLM:** `openai/gpt-oss-120b` via the Groq API
-- **Orchestration:** LangGraph (7 agents, with a coverage loop of up to 3 search rounds)
+- **Orchestration:** LangGraph (7 agents, with a coverage loop of up to 2 search rounds)
 - **Search engines:** Google (Serper, SerpApi), Google Shopping, Bing (via SerpApi), Brave, Tavily, optional AliExpress Affiliate API
 - **RAG:** BM25 + `bge-small-en-v1.5` embeddings -> reciprocal rank fusion -> `ms-marco-MiniLM` cross-encoder
 - **UI:** Streamlit

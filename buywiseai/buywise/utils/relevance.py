@@ -98,3 +98,29 @@ def lexical_match(title: str, url: str, snippet: str, product: str, min_ratio: f
         return False
     hay = set(_tokens(title)) | set(_tokens(url.split("?")[0].split("//", 1)[-1])) | set(_tokens(snippet or ""))
     return sum(t in hay for t in toks) / len(toks) >= min_ratio
+
+
+_KIDS = {"kid", "kids", "child", "children", "baby", "babies", "toddler", "toddlers", "infant"}
+
+
+def judge_query(query: str) -> str:
+    """Query text for the LLM relevance judge.
+
+    LLMs read 'for girls' as 'children only' and reject women's items. So audience words are removed from the
+    product text and restated as an explicit rule: gender is enforced, age is not.
+    """
+    toks = re.findall(r"[A-Za-z0-9.+\-']+", query)
+    low = [t.lower() for t in toks]
+    audience = _FEMALE | _MALE | _KIDS
+    fem, mal, kid = (any(t in grp for t in low) for grp in (_FEMALE, _MALE, _KIDS))
+    kept = [t for t, l in zip(toks, low) if l not in audience]
+    while kept and kept[-1].lower() in {"for", "of", "to"}:
+        kept.pop()
+    base = " ".join(kept) or query
+    if kid:
+        return f"{base} (audience: children)"
+    if fem and not mal:
+        return f"{base} (audience: female, any age; reject only clearly male-only items)"
+    if mal and not fem:
+        return f"{base} (audience: male, any age; reject only clearly female-only items)"
+    return base

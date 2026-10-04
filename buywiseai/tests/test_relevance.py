@@ -61,3 +61,11 @@ def test_lexical_match_rescues_south_asian_clothing_titles():
     assert lexical_match("RTW - KAMEEZ & SHALWAR", "", "", "shalwar kameez")
     assert not lexical_match("Embellished Raglan Blouse", "https://x.pk/products/blouse", "", "shalwar kameez")
     assert not lexical_match("Toddler Girl Blue Trouser", "", "", "shalwar kameez")
+
+
+def test_judge_query_restates_audience_instead_of_girls():
+    from buywise.utils.relevance import judge_query
+    q = judge_query("shalwar kameez for girls")
+    assert q.startswith("shalwar kameez (audience: female, any age")
+    assert judge_query("iphone 15 128gb") == "iphone 15 128gb"
+    assert judge_query("kids shoes").endswith("(audience: children)")
