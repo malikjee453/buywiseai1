@@ -75,4 +75,10 @@ def verify_listings(pool: list[Listing], settings: RunSettings, plan: QueryPlan)
             l.notes.append("International shipping: customs/delivery time may apply.")
         if l.domain.endswith("olx.com.pk"):
             l.notes.append("Classified listing: may be used / negotiable.")
+    # A far-below-median price that came only from a snippet/LLM (never confirmed on the product page) is
+    # more likely a parsing slip, placeholder or bait price than a real offer: drop it. Page/API prices keep a warning.
+    shaky = {id(l) for l in valid if "price_far_below_median" in l.flags and l.price_origin in ("text", "llm")}
+    if shaky:
+        drops["unverified_price_outlier"] = len(shaky)
+        valid = [l for l in valid if id(l) not in shaky]
     return valid, dict(drops), dict(samples)

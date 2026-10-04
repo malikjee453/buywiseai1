@@ -43,6 +43,10 @@ def shared_cache() -> dict:
     return {}
 
 
+ORIGIN_LABEL = {"api": "search-engine price", "text": "from search snippet", "llm": "read from snippet by AI",
+                "page-meta": "confirmed on store page", "shopify-feed": "store product feed"}
+
+
 def cache_key(query: str, s: RunSettings) -> str:
     return hashlib.sha1((query.strip().lower() + json.dumps(asdict(s), sort_keys=True)).encode()).hexdigest()
 
@@ -184,6 +188,7 @@ if result:
                         b.markdown(f"### {disp(l)}")
                         if l.currency != currency and l.price:
                             b.caption(f"Listed: {format_price(l.price, l.currency)}")
+                        b.caption("Price: " + ORIGIN_LABEL.get(l.price_origin, l.price_origin))
                         c.markdown(f"**{l.source}**")
                         c.caption("Trust " + "★" * l.trust_score + "☆" * (5 - l.trust_score)
                                   + (f" · Rating {l.rating}" if l.rating else ""))
@@ -192,7 +197,7 @@ if result:
                 df = pd.DataFrame([{
                     "Title": l.title, f"Price ({currency})": round(convert(l.price_pkr, "PKR", currency), 2),
                     "Source": l.source, "Trust": l.trust_score, "Rating": l.rating, "URL": l.url,
-                    "Notes": " | ".join(l.notes),
+                    "Price source": ORIGIN_LABEL.get(l.price_origin, l.price_origin), "Notes": " | ".join(l.notes),
                 } for l in shown])
                 st.dataframe(df, use_container_width=True, hide_index=True,
                              column_config={"URL": st.column_config.LinkColumn("URL", display_text="Open")})
