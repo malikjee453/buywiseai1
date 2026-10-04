@@ -18,9 +18,14 @@ def is_accessory(title: str, query: str) -> bool:
     """
     checked = re.sub(r"\bwith\s+(?:a\s+|free\s+|original\s+)?[a-z]+", " ", title.lower())
     for word in load_app_settings().get("accessory_words", []):
-        if _has_word(checked, word) and not _has_word(query, word):
+        if _has_word_pl(checked, word) and not _has_word_pl(query, word):
             return True
     return False
+
+
+def _has_word_pl(text: str, word: str) -> bool:
+    """Like _has_word but also matches the plural ('chargers', 'cases', 'straps')."""
+    return re.search(r"(?<![a-z0-9])" + re.escape(word.lower()) + r"(?:s|es)?(?![a-z0-9])", text.lower()) is not None
 
 
 _SPEC_UNIT = re.compile(r"^\d+(?:gb|tb|mb|mah|w|hz|mp|inch|in|ton|kg|ml|l|cm|mm|v|k|g|pcs|pack|ram|rom)$")
@@ -140,3 +145,22 @@ def normalize_word(w: str) -> str:
 def spelling_swap(query: str) -> str:
     """'salwar suit' -> 'shalwar suit' (search engines treat the spellings as different words)."""
     return " ".join(_SWAP.get(w.lower(), w) for w in query.split())
+
+
+def drop_broader_variants(variants: list[str], product: str, keep: str | None = None) -> list[str]:
+    """Remove search variants that are strictly more generic than the product ('lipo' for 'lipo battery').
+
+    Such variants pull in unrelated items (mice, power banks, chargers) and waste LLM-judge calls.
+    Only applies when the product has 2+ content words; a one-word product keeps all its variants.
+    `keep` (the user's own wording) is never dropped.
+    """
+    ptoks = {normalize_word(t) for t in _tokens(product) if t not in _LEX_STOP and len(t) > 1}
+    if len(ptoks) < 2:
+        return list(variants)
+    out = []
+    for v in variants:
+        vtoks = {normalize_word(t) for t in _tokens(v) if t not in _LEX_STOP and len(t) > 1}
+        if vtoks and vtoks < ptoks and not (keep and v.strip().lower() == keep.strip().lower()):   # proper subset => broader
+            continue
+        out.append(v)
+    return out

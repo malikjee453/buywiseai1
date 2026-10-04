@@ -30,7 +30,8 @@ from buywise.rag.retriever import HybridRetriever
 from buywise.schemas import Listing, QueryPlan, RawResult
 from buywise.utils.currency import convert
 from buywise.utils.meta_fetch import collection_handle, fetch_collection_products, fetch_product_meta_ex
-from buywise.utils.relevance import gender_conflict, is_accessory, judge_query, normalize_word, title_matches_model
+from buywise.utils.relevance import (gender_conflict, is_accessory, judge_query, lexical_match, normalize_word,
+                                     title_matches_model)
 from buywise.utils.url_utils import dedupe, is_foreign_storefront, is_product_url, is_rankable
 
 
@@ -182,6 +183,7 @@ def n_enrich(state: State) -> dict:
     blocked_domains = set(state.get("robots_blocked", []))
     allowance = min(s.max_meta_fetches - len(done), s.meta_fetches_per_round)
     pool, fixed, reasons = _pool(state), 0, Counter()
+    by_site: dict[str, Counter] = {}
     if allowance > 0 and s.require_price:
         by_domain: dict[str, list[Listing]] = {}
         picked = 0
@@ -191,7 +193,11 @@ def n_enrich(state: State) -> dict:
             if (l.price is not None or l.url in done or "shopping_link" in l.flags or is_foreign_storefront(l.domain)
                     or l.domain in blocked_domains):
                 continue
-            if l.relevance < s.rerank_threshold or not is_product_url(l.url):
+            if not is_product_url(l.url):
+                continue
+            # Same rescue rule verification uses: the cross-encoder under-scores short hobby/electronics titles
+            # (and anything past rerank_top is set to -99), so a plain word match must still earn a price lookup.
+            if l.relevance < s.rerank_threshold and not lexical_match(l.title, l.url, l.snippet, plan.product, min_ratio=0.6):
                 continue
             if (is_accessory(l.title, plan.original) or gender_conflict(l.title, l.url, plan.original)
                     or not title_matches_model(l.title, l.url, plan.original)):
@@ -221,13 +227,15 @@ def n_enrich(state: State) -> dict:
                     else:
                         done.add(l.url)
                     reasons[reason] += 1
+                    by_site.setdefault(l.domain, Counter())[reason] += 1
                     if meta and meta[1] in ("PKR", "USD"):
                         l.price, l.currency, l.price_origin = meta[0], meta[1], "page-meta"
                         l.price_pkr = convert(meta[0], meta[1], "PKR")
                         fixed += 1
     return {"pool": [l.model_dump() for l in pool], "meta_fetched": sorted(done), "robots_blocked": sorted(blocked_domains),
             "trace": [f"[Enrichment] {sum(reasons.values())} page lookups -> {fixed} price(s) found; "
-                      f"outcomes: {dict(reasons) or 'none'} ({len(done)}/{s.max_meta_fetches} budget used)"]}
+                      f"outcomes: {dict(reasons) or 'none'} ({len(done)}/{s.max_meta_fetches} budget used)"]
+            + (["   by site: " + "; ".join(f"{d} {dict(c)}" for d, c in sorted(by_site.items()))] if by_site else [])}
 
 
 def n_verify(state: State) -> dict:

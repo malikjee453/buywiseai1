@@ -7,7 +7,7 @@ import re
 from buywise.config import CATEGORIES, RunSettings
 from buywise.llm import LLM, LLMError
 from buywise.schemas import QueryPlan
-from buywise.utils.relevance import spelling_swap
+from buywise.utils.relevance import drop_broader_variants, spelling_swap
 
 log = logging.getLogger(__name__)
 
@@ -26,8 +26,10 @@ SYSTEM = (
     "You are the query-understanding agent of a Pakistani shopping search engine. "
     "Return ONLY a JSON object with keys: product (string), brand (string|null), "
     f"categories (subset of {CATEGORIES}), max_budget_pkr (number|null), used_ok (boolean), "
-    "variants (3-5 short search queries: the cleaned English query, model-number-only, brand+model, "
-    "and a local-usage variant such as Roman Urdu/common Pakistani naming where it helps). "
+    "variants (3-5 short search queries: the cleaned English query, brand+model, a model-number-only query "
+    "ONLY if the user gave a model number, and a local-usage variant such as Roman Urdu/common Pakistani naming "
+    "where it helps). Every variant must stay as specific as the user's query: never shorten it to a bare, "
+    "generic word (e.g. never 'lipo' for 'lipo battery'). "
     "Do not invent specs the user did not mention."
 )
 
@@ -82,6 +84,7 @@ def understand_query(query: str, settings: RunSettings, llm: LLM | None = None) 
             break
         if extra and extra.lower() not in {v.lower() for v in variants}:
             variants.append(extra)
+    variants = drop_broader_variants(variants, base.product, keep=query)
     base.variants = variants[:6]
     if settings.categories:
         base.categories = sorted(set(settings.categories) | {"general"})

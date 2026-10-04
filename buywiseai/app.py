@@ -70,7 +70,7 @@ st.sidebar.subheader("Results")
 target = st.sidebar.slider("Number of results", 10, 20, 10)
 min_platforms = st.sidebar.slider("Min. distinct platforms", 3, 10, 6)
 cap = st.sidebar.slider("Max results per platform", 1, 3, 2)
-rounds = st.sidebar.slider("Max search rounds", 1, 3, 2)
+rounds = st.sidebar.slider("Max search rounds", 1, 3, 3)
 
 st.sidebar.subheader("Search providers")
 avail = [n for n, ok in status.items() if ok]

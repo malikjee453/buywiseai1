@@ -88,16 +88,34 @@ class SearchProvider(ABC):
         return []
 
 
+def _find_price_value(node, depth: int = 0) -> str | None:
+    """Depth-limited search of nested dicts/lists for a value under a key containing 'price'."""
+    if depth > 4:
+        return None
+    if isinstance(node, dict):
+        for k, v in node.items():
+            if "price" in str(k).lower() and isinstance(v, (str, int, float)) and str(v).strip():
+                return str(v)
+        for v in node.values():
+            found = _find_price_value(v, depth + 1)
+            if found:
+                return found
+    elif isinstance(node, list):
+        for v in node[:10]:
+            found = _find_price_value(v, depth + 1)
+            if found:
+                return found
+    return None
+
+
 def price_text_from(item: dict) -> str | None:
-    """Find a price-like string in a search-result dict (rich snippets, attributes)."""
+    """Find a price-like string in a search-result dict (rich snippets, attributes, nested extensions)."""
     for k in ("price", "priceRange", "price_text"):
         v = item.get(k)
         if v:
             return str(v)
     for k in ("attributes", "richSnippet", "rich_snippet"):
-        v = item.get(k)
-        if isinstance(v, dict):
-            for kk, vv in v.items():
-                if "price" in str(kk).lower() and vv:
-                    return str(vv)
+        found = _find_price_value(item.get(k))
+        if found:
+            return found
     return None

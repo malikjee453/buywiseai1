@@ -14,6 +14,7 @@ from urllib.robotparser import RobotFileParser
 
 import requests
 
+from buywise.utils.price_parser import parse_price
 from buywise.utils.url_utils import get_domain
 
 log = logging.getLogger(__name__)
@@ -73,6 +74,32 @@ def parse_product_meta(html: str) -> tuple[float, str] | None:
             return float(amount.group(1).replace(",", "")), cur.group(1).upper()
         except ValueError:
             return None
+    return None
+
+
+_DARAZ_SALE = re.compile(r'"salePrice"\s*:\s*\{[^{}]*?"value"\s*:\s*"?([\d.]+)"?', re.I)
+_DARAZ_TRACK = re.compile(r'"pdt_price"\s*:\s*"([^"]+)"', re.I)
+
+
+def parse_daraz_embedded(html: str) -> tuple[float, str] | None:
+    """Fallback for Daraz product pages whose price lives in embedded page JSON instead of JSON-LD/OG tags.
+
+    Looks for the SKU `salePrice.value` and the tracking blob's `pdt_price` ("Rs. 1,299"). The key names are
+    from Daraz's page structure as I know it: re-check them against a saved real page if Daraz changes layout.
+    """
+    m = _DARAZ_SALE.search(html)
+    if m:
+        try:
+            v = float(m.group(1))
+            if v > 0:
+                return v, "PKR"
+        except ValueError:
+            pass
+    m = _DARAZ_TRACK.search(html)
+    if m:
+        p = parse_price(m.group(1), default_currency="PKR")
+        if p:
+            return p.amount, "PKR"
     return None
 
 
@@ -171,6 +198,10 @@ def fetch_product_meta_ex(url: str) -> tuple[tuple[float, str] | None, str]:
         meta = parse_product_meta(r.text)
         if meta:
             return meta, "ok"
+        if domain == "daraz.pk" or domain.endswith(".daraz.pk"):
+            meta = parse_daraz_embedded(r.text)
+            if meta:
+                return meta, "ok_daraz_json"
         handle = product_handle(url)
         if handle:                                   # Shopify-style product: try its public JSON
             data, why = _get_json(f"https://{domain}/products/{handle}.json")

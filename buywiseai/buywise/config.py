@@ -85,7 +85,7 @@ class RunSettings:
     target_results: int = 10
     min_platforms: int = 6
     per_platform_cap: int = 2
-    max_rounds: int = 2
+    max_rounds: int = 3
     providers: list[str] = field(default_factory=list)   # empty = all available
     categories: list[str] = field(default_factory=list)  # empty = auto-detect
     platform_domains: list[str] = field(default_factory=list)  # empty = whitelist
