@@ -69,3 +69,10 @@ def test_judge_query_restates_audience_instead_of_girls():
     assert q.startswith("shalwar kameez (audience: female, any age")
     assert judge_query("iphone 15 128gb") == "iphone 15 128gb"
     assert judge_query("kids shoes").endswith("(audience: children)")
+
+
+def test_spelling_variants_salwar_shalwar():
+    from buywise.utils.relevance import lexical_match, normalize_word, spelling_swap
+    assert normalize_word("salwar") == "shalwar" and normalize_word("qameez") == "kameez"
+    assert spelling_swap("salwar suit") == "shalwar suit"
+    assert lexical_match("Wine Blended Shalwar Suit", "", "", "salwar suit")

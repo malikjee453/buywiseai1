@@ -7,6 +7,7 @@ import re
 from buywise.config import CATEGORIES, RunSettings
 from buywise.llm import LLM, LLMError
 from buywise.schemas import QueryPlan
+from buywise.utils.relevance import spelling_swap
 
 log = logging.getLogger(__name__)
 
@@ -76,6 +77,11 @@ def understand_query(query: str, settings: RunSettings, llm: LLM | None = None) 
         if v and v.lower() not in seen:
             seen.add(v.lower())
             variants.append(v)
+    for extra in (spelling_swap(query.strip()), f"{base.product} price in Pakistan", f"buy {base.product} online Pakistan"):
+        if len(variants) >= 3:
+            break
+        if extra and extra.lower() not in {v.lower() for v in variants}:
+            variants.append(extra)
     base.variants = variants[:6]
     if settings.categories:
         base.categories = sorted(set(settings.categories) | {"general"})

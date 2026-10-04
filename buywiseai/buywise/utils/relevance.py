@@ -93,10 +93,11 @@ def lexical_match(title: str, url: str, snippet: str, product: str, min_ratio: f
     Suit - Farshi Shalwar' at -11 for 'shalwar kameez'), so a plain word overlap rescues obvious matches.
     Model/accessory/gender checks and the LLM judge still run afterwards.
     """
-    toks = [t for t in _tokens(product) if t not in _LEX_STOP and len(t) > 1]
+    toks = [normalize_word(t) for t in _tokens(product) if t not in _LEX_STOP and len(t) > 1]
     if not toks:
         return False
-    hay = set(_tokens(title)) | set(_tokens(url.split("?")[0].split("//", 1)[-1])) | set(_tokens(snippet or ""))
+    hay = {normalize_word(t) for t in
+           set(_tokens(title)) | set(_tokens(url.split("?")[0].split("//", 1)[-1])) | set(_tokens(snippet or ""))}
     return sum(t in hay for t in toks) / len(toks) >= min_ratio
 
 
@@ -124,3 +125,18 @@ def judge_query(query: str) -> str:
     if mal and not fem:
         return f"{base} (audience: male, any age; reject only clearly female-only items)"
     return base
+
+
+# Common Pakistani-English spelling variants of the same word -> canonical form
+_CANON = {"salwar": "shalwar", "shalwaar": "shalwar", "salwaar": "shalwar", "shalwer": "shalwar",
+          "qameez": "kameez", "kameeze": "kameez", "kamiz": "kameez", "qamis": "kameez", "kameezz": "kameez"}
+_SWAP = {"salwar": "shalwar", "shalwar": "salwar", "qameez": "kameez", "kameez": "qameez"}
+
+
+def normalize_word(w: str) -> str:
+    return _CANON.get(w, w)
+
+
+def spelling_swap(query: str) -> str:
+    """'salwar suit' -> 'shalwar suit' (search engines treat the spellings as different words)."""
+    return " ".join(_SWAP.get(w.lower(), w) for w in query.split())

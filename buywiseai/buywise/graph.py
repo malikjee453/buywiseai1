@@ -30,7 +30,7 @@ from buywise.rag.retriever import HybridRetriever
 from buywise.schemas import Listing, QueryPlan, RawResult
 from buywise.utils.currency import convert
 from buywise.utils.meta_fetch import collection_handle, fetch_collection_products, fetch_product_meta_ex
-from buywise.utils.relevance import gender_conflict, is_accessory, judge_query, title_matches_model
+from buywise.utils.relevance import gender_conflict, is_accessory, judge_query, normalize_word, title_matches_model
 from buywise.utils.url_utils import dedupe, is_foreign_storefront, is_product_url, is_rankable
 
 
@@ -112,7 +112,7 @@ def n_expand(state: State) -> dict:
     if not s.use_shopify_feeds:
         return {"trace": ["[Shopify feeds] disabled in settings"]}
     done = set(state.get("expanded", []))
-    qtoks = {t for t in re.findall(r"[a-z0-9]+", plan.original.lower()) if t not in _STOP and len(t) > 1}
+    qtoks = {normalize_word(t) for t in re.findall(r"[a-z0-9]+", plan.original.lower()) if t not in _STOP and len(t) > 1}
     cands, seen = [], set()
     for l in _pool(state):
         h = collection_handle(l.url)
@@ -121,7 +121,7 @@ def n_expand(state: State) -> dict:
         if not h or key in done or key in seen or plat is None or plat.country != "PK" or is_foreign_storefront(l.domain):
             continue
         words = h.replace("_", "-").split("-")
-        overlap = len(qtoks & set(words))
+        overlap = len(qtoks & {normalize_word(w) for w in words})
         if overlap == 0 or gender_conflict(" ".join(words), "", plan.original):
             continue
         seen.add(key)
@@ -208,7 +208,7 @@ def n_enrich(state: State) -> dict:
                     continue
                 res = fetch_product_meta_ex(l.url)
                 out.append((l, *res))
-                blocked = res[1] == "robots"
+                blocked = res[1] in ("robots", "http_403")
             return out
 
         with ThreadPoolExecutor(max_workers=6) as ex:
@@ -216,7 +216,7 @@ def n_enrich(state: State) -> dict:
                 for l, meta, reason in batch:
                     if reason == "skipped":
                         continue
-                    if reason == "robots":
+                    if reason in ("robots", "http_403"):
                         blocked_domains.add(l.domain)     # remembered across rounds; costs no lookup budget
                     else:
                         done.add(l.url)
