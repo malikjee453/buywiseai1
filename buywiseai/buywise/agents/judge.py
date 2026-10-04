@@ -37,16 +37,26 @@ def _truthy(v) -> bool:
 def judge_relevance(listings: list, query: str, llm: LLM | None, max_items: int = 40) -> tuple[list, int]:
     """Returns (kept_listings, number_dropped)."""
     judge_relevance.last_dropped = []
-    if not listings or llm is None or not llm.available():
+    judge_relevance.last_status = "not run"
+    if not listings:
+        return listings, 0
+    if llm is None or not llm.available():
+        judge_relevance.last_status = "skipped (no GROQ_API_KEY): nothing filtered"
         return listings, 0
     ranked = sorted(listings, key=lambda l: l.score, reverse=True)
     head, tail = ranked[:max_items], ranked[max_items:]
     payload = "\n".join(f"{i}. {l.title} | {l.source} | {_slug(l.url)}" for i, l in enumerate(head))
-    try:
-        data = llm.chat_json(SYSTEM, f"User wants to buy: {query}\n\nListings:\n{payload}",
-                             temperature=0.0, reasoning="low", max_tokens=3000)
-    except LLMError as e:
-        log.warning("Relevance judge skipped: %s", e)
+    data, err = None, None
+    for max_tok in (3000, 7000):      # reasoning tokens count against the limit: retry once with more headroom
+        try:
+            data = llm.chat_json(SYSTEM, f"User wants to buy: {query}\n\nListings:\n{payload}",
+                                 temperature=0.0, reasoning="low", max_tokens=max_tok)
+            break
+        except LLMError as e:
+            err = e
+    if data is None:
+        log.warning("Relevance judge skipped: %s", err)
+        judge_relevance.last_status = f"FAILED ({str(err)[:90]}): nothing filtered, so results may include wrong items"
         return listings, 0
     verdict: dict[int, bool] = {}
     for it in data.get("items", []):
@@ -56,4 +66,5 @@ def judge_relevance(listings: list, query: str, llm: LLM | None, max_items: int 
             continue
     kept_head = [l for i, l in enumerate(head) if verdict.get(i, True)]   # unknown id => keep
     judge_relevance.last_dropped = [f"{l.title[:45]} ({l.source})" for i, l in enumerate(head) if not verdict.get(i, True)]
+    judge_relevance.last_status = f"checked {len(head)} listings, rejected {len(head) - len(kept_head)}"
     return kept_head + tail, len(head) - len(kept_head)

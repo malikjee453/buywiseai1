@@ -241,6 +241,7 @@ def n_verify(state: State) -> dict:
     selected = select_results(valid, s.target_results, s.per_platform_cap)
     status = coverage_status(selected, s.target_results, s.min_platforms)
     trace = [f"[Verification agent] {len(valid)} valid; dropped: {drops or 'none'}"]
+    trace.append(f"   [LLM judge] {getattr(judge_relevance, 'last_status', 'n/a')}")
     for reason in ("not_product_page", "no_price", "model_mismatch", "low_relevance"):
         if samples.get(reason):
             trace.append(f"   e.g. {reason}: " + " | ".join(samples[reason]))
