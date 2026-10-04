@@ -1,0 +1,37 @@
+# Whitelist of platforms BuyWiseAI may return. Edit freely - no code changes needed.
+# trust_score is YOUR editorial rating (1-5), not an official metric.
+- {name: Daraz, domain: daraz.pk, category: general, country: PK, currency: PKR, trust_score: 4}
+- {name: AliExpress, domain: aliexpress.com, category: general, country: INTL, currency: USD, trust_score: 3}
+- {name: OLX Pakistan, domain: olx.com.pk, category: general, country: PK, currency: PKR, trust_score: 2}
+- {name: HomeShopping, domain: homeshopping.pk, category: general, country: PK, currency: PKR, trust_score: 3}
+- {name: Yayvo, domain: yayvo.com, category: general, country: PK, currency: PKR, trust_score: 3}
+
+- {name: PriceOye, domain: priceoye.pk, category: electronics, country: PK, currency: PKR, trust_score: 4}
+- {name: Telemart, domain: telemart.pk, category: electronics, country: PK, currency: PKR, trust_score: 4}
+- {name: Shophive, domain: shophive.com, category: electronics, country: PK, currency: PKR, trust_score: 4}
+- {name: Czone, domain: czone.com.pk, category: electronics, country: PK, currency: PKR, trust_score: 4}
+- {name: Goto, domain: goto.com.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
+- {name: Mega.pk, domain: mega.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
+- {name: iShopping, domain: ishopping.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
+- {name: Symbios, domain: symbios.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
+- {name: Vmart, domain: vmart.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
+- {name: WhatMobile, domain: whatmobile.com.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
+
+- {name: Khaadi, domain: khaadi.com, category: fashion, country: PK, currency: PKR, trust_score: 5}
+- {name: Outfitters, domain: outfitters.com.pk, category: fashion, country: PK, currency: PKR, trust_score: 4}
+- {name: Sapphire, domain: sapphireonline.pk, category: fashion, country: PK, currency: PKR, trust_score: 5}
+- {name: Gul Ahmed, domain: gulahmedshop.com, category: fashion, country: PK, currency: PKR, trust_score: 5}
+- {name: Alkaram Studio, domain: alkaramstudio.com, category: fashion, country: PK, currency: PKR, trust_score: 5}
+- {name: Bonanza Satrangi, domain: bonanzasatrangi.com, category: fashion, country: PK, currency: PKR, trust_score: 4}
+- {name: Breakout, domain: breakout.com.pk, category: fashion, country: PK, currency: PKR, trust_score: 4}
+
+- {name: Naheed, domain: naheed.pk, category: grocery, country: PK, currency: PKR, trust_score: 4}
+- {name: Al-Fatah, domain: alfatah.com.pk, category: grocery, country: PK, currency: PKR, trust_score: 4}
+- {name: Metro Online, domain: metro-online.pk, category: grocery, country: PK, currency: PKR, trust_score: 4}
+- {name: Carrefour Pakistan, domain: carrefour.pk, category: grocery, country: PK, currency: PKR, trust_score: 4}
+
+- {name: Dawaai, domain: dawaai.pk, category: health, country: PK, currency: PKR, trust_score: 4}
+- {name: Sehat, domain: sehat.com.pk, category: health, country: PK, currency: PKR, trust_score: 3}
+
+- {name: Interwood, domain: interwood.pk, category: home, country: PK, currency: PKR, trust_score: 4}
+- {name: Habitt, domain: habitt.com, category: home, country: PK, currency: PKR, trust_score: 4}

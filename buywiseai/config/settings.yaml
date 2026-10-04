@@ -1,0 +1,32 @@
+llm:
+  model: openai/gpt-oss-120b
+
+fx:
+  fallback_usd_pkr: 280.0      # used only if the live rate API is unreachable
+  cache_hours: 12
+
+# Words that mark a listing as an accessory (unless the query itself contains them)
+accessory_words:
+  - case
+  - cover
+  - protector
+  - "tempered glass"
+  - "screen guard"
+  - strap
+  - skin
+  - pouch
+  - sleeve
+  - sticker
+  - holder
+  - "compatible with"
+  - "replacement"
+  - charger
+  - cable
+  - adapter
+
+# URL path segments that identify search / category pages (never product pages)
+non_product_segments: [search, catalog, category, categories, tag, tags, brand, brands, browse, s, wholesale]
+non_product_query_keys: [q, search, query, keyword, text, searchtext, k]
+
+# Tracking params removed during URL canonicalisation
+tracking_params: [utm_source, utm_medium, utm_campaign, utm_term, utm_content, fbclid, gclid, spm, scm, pvid, algo_pvid, algo_exp_id, ref, ref_src, srsltid, sk, cv, aem_p4p_detail, pdp_npi]
