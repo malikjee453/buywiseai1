@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 
 from buywise.config import get_secret, load_app_settings
 
@@ -12,6 +13,33 @@ log = logging.getLogger(__name__)
 
 class LLMError(RuntimeError):
     pass
+
+
+_cooldown_until = 0.0          # unix time until which we don't call the API (rate limit hit)
+_RETRY_IN = re.compile(r"try again in\s+(?:(\d+)h)?\s*(?:(\d+)m)?\s*(?:(\d+(?:\.\d+)?)s)?", re.I)
+
+
+def is_rate_limited(msg: str) -> bool:
+    low = msg.lower()
+    return "429" in low or "rate limit" in low or "rate_limit" in low
+
+
+def retry_seconds(msg: str, default: float = 60.0) -> float:
+    """Seconds from 'Please try again in 7m33.6s' (capped at 1h so we re-check regularly)."""
+    m = _RETRY_IN.search(msg)
+    if not m or not any(m.groups()):
+        return default
+    h, mi, sec = (float(g) if g else 0.0 for g in m.groups())
+    return min(h * 3600 + mi * 60 + sec, 3600.0)
+
+
+def rate_limited_now() -> bool:
+    return time.time() < _cooldown_until
+
+
+def _rate_limit_error() -> LLMError:
+    mins = max(1, round((_cooldown_until - time.time()) / 60))
+    return LLMError(f"Groq rate limit reached (token cap): AI steps paused ~{mins} min, rule-based checks still run")
 
 
 class LLM:
@@ -54,12 +82,19 @@ class LLM:
         )
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
+        global _cooldown_until
+        if rate_limited_now():                         # don't spend a request (or wait on retries) while capped
+            raise _rate_limit_error()
         client = self._get_client()
         try:
-            resp = client.chat.completions.create(reasoning_effort=reasoning, **kwargs)
-        except TypeError:
-            resp = client.chat.completions.create(**kwargs)   # older SDK without reasoning_effort
+            try:
+                resp = client.chat.completions.create(reasoning_effort=reasoning, **kwargs)
+            except TypeError:
+                resp = client.chat.completions.create(**kwargs)   # older SDK without reasoning_effort
         except Exception as e:
+            if is_rate_limited(str(e)):
+                _cooldown_until = time.time() + retry_seconds(str(e))
+                raise _rate_limit_error() from e
             raise LLMError(str(e)) from e
         return (resp.choices[0].message.content or "").strip()
 

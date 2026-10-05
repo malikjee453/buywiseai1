@@ -43,7 +43,7 @@ def verify_listings(pool: list[Listing], settings: RunSettings, plan: QueryPlan)
             _drop("not_product_page", l)
         elif settings.require_price and (l.price_pkr is None or l.price_pkr <= 0):
             _drop("no_price", l)
-        elif not plan.used_ok and is_accessory(l.title, plan.original):
+        elif not plan.used_ok and is_accessory(l.title, plan.original, l.url):
             _drop("accessory", l)
         elif gender_conflict(l.title, l.url, plan.original):
             _drop("gender_mismatch", l)

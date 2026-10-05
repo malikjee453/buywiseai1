@@ -55,5 +55,6 @@ class AliExpressProvider(SearchProvider):
                 title=p.get("product_title", ""), url=p.get("product_detail_url", ""),
                 price=float(price) if price else None, currency=p.get("target_sale_price_currency", "USD"),
                 source="AliExpress", provider=self.name, from_shopping=True,
+                image_url=p.get("product_main_image_url"),
             ))
         return out

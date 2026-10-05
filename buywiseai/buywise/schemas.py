@@ -19,6 +19,7 @@ class RawResult(BaseModel):
     rating: Optional[float] = None
     provider: str = ""
     from_shopping: bool = False
+    image_url: Optional[str] = None       # product picture, if the engine supplied one
 
 
 class Listing(BaseModel):
@@ -37,6 +38,7 @@ class Listing(BaseModel):
     trust_score: int = 3
     provider: str = ""
     price_origin: str = "api"             # api | text | llm | page-meta
+    image_url: Optional[str] = None       # product picture (search thumbnail, store feed or og:image)
     relevance: float = 0.0                # reranker / fused score
     score: float = 0.0                    # final ranking score
     flags: list[str] = Field(default_factory=list)

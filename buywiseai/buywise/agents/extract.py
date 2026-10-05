@@ -9,7 +9,7 @@ from buywise.llm import LLM, LLMError
 from buywise.schemas import Listing, RawResult
 from buywise.utils.currency import convert
 from buywise.utils.price_parser import count_prices, find_price, parse_price
-from buywise.utils.url_utils import get_domain
+from buywise.utils.url_utils import clean_image_url, get_domain
 
 log = logging.getLogger(__name__)
 
@@ -35,6 +35,14 @@ def _clean_title(title: str, platform_name: str, domain: str) -> str:
     return title[:120].rstrip()
 
 
+def _home_storefront(url: str, domain: str) -> str:
+    """AliExpress item pages on locale hosts (vi./es./fr.) quote local currencies: use the main storefront URL."""
+    if domain.endswith(".aliexpress.com") and "/item/" in url:
+        path = url.split("?")[0].split("//", 1)[-1].split("/", 1)[-1]
+        return "https://www.aliexpress.com/" + path
+    return url
+
+
 def _to_listing(raw: RawResult, platforms) -> Listing | None:
     domain = get_domain(raw.url)
     plat = match_platform(domain, platforms)
@@ -50,6 +58,8 @@ def _to_listing(raw: RawResult, platforms) -> Listing | None:
         # Text with 3+ prices is a list/category page: any single price would be a guess
         if not parsed and count_prices(f"{raw.title} {raw.snippet}") < 3:
             parsed = find_price(raw.title, raw.snippet)
+        if parsed and parsed.currency == "USD" and plat.currency == "PKR":
+            parsed = None       # a dollar figure on a rupee store is usually a launch/spec-sheet price, not the store's price
         if parsed:
             price, cur = parsed.amount, parsed.currency
             origin = "api" if raw.price_text and parse_price(raw.price_text) else "text"
@@ -62,8 +72,9 @@ def _to_listing(raw: RawResult, platforms) -> Listing | None:
             price, price_pkr = None, None
     listing = Listing(
         title=_clean_title(raw.title, plat.name, plat.domain), price=price, currency=cur or plat.currency,
-        price_pkr=price_pkr, source=plat.name, domain=domain or plat.domain, url=raw.url, rating=raw.rating,
+        price_pkr=price_pkr, source=plat.name, domain=domain or plat.domain, url=_home_storefront(raw.url, domain), rating=raw.rating,
         snippet=(raw.snippet or "")[:300], trust_score=plat.trust_score, provider=raw.provider, price_origin=origin,
+        image_url=clean_image_url(raw.image_url),
     )
     if shopping_proxy:
         listing.notes.append("Link goes via Google Shopping")

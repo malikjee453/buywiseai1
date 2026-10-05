@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from buywise.config import load_app_settings, match_platform
 
@@ -38,6 +38,8 @@ def canonicalize_url(url: str) -> str:
     scheme = "https"
     domain = get_domain(url)
     path = re.sub(r"/+$", "", p.path) or "/"
+    if _base_domain(domain) == "aliexpress.com" and path.startswith("/item/"):
+        domain = "aliexpress.com"            # vi./es./pk. locale hosts are the same item (and show foreign currencies)
     if _base_domain(domain) in _DROP_ALL_QUERY:
         query = ""
     else:
@@ -75,19 +77,42 @@ def _title_key(title: str) -> str:
 
 
 def dedupe(listings: list) -> list:
-    """Drop duplicates: same canonical URL, or same platform + title + price."""
-    seen_urls: set[str] = set()
-    seen_sig: set[tuple] = set()
+    """Drop duplicates: same canonical URL, or same platform + title + price.
+
+    A dropped duplicate donates its picture to the kept listing when that one has none.
+    """
+    by_url: dict[str, object] = {}
+    by_sig: dict[tuple, object] = {}
     out = []
     for l in listings:
         key = canonicalize_url(l.url)
         sig = (l.domain, _title_key(l.title), round(l.price or 0))
-        if key in seen_urls or (sig[1] and sig in seen_sig):
+        prior = by_url.get(key) or (by_sig.get(sig) if sig[1] else None)
+        if prior is not None:
+            if not getattr(prior, "image_url", None) and getattr(l, "image_url", None):
+                prior.image_url = l.image_url
             continue
-        seen_urls.add(key)
-        seen_sig.add(sig)
+        by_url[key] = l
+        by_sig[sig] = l
         out.append(l)
     return out
+
+
+def clean_image_url(url, base: str | None = None) -> str | None:
+    """Return a safe, absolute https image URL, or None. Rejects data: URIs, junk and logo/sprite files."""
+    if not url or not isinstance(url, str):
+        return None
+    url = url.strip()
+    if base:
+        url = urljoin(base, url)
+    elif url.startswith("//"):
+        url = "https:" + url
+    p = urlparse(url)
+    if p.scheme not in ("http", "https") or not p.netloc or len(url) > 2000:
+        return None
+    if re.search(r"(?:logo|sprite|placeholder|favicon|blank\.)", p.path, re.I):
+        return None
+    return "https://" + url.split("://", 1)[1] if p.scheme == "http" else url      # avoid mixed-content blocking
 
 
 _FOREIGN_PREFIXES = {"us", "uk", "uae", "ae", "ca", "au", "eu", "sa", "qa", "kw", "om", "bh", "de", "fr", "in", "global", "int", "intl", "staging", "stage", "dev", "test", "uat"}

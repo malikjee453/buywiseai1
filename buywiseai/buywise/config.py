@@ -99,6 +99,7 @@ class RunSettings:
     max_meta_fetches: int = 40
     meta_fetches_per_round: int = 20
     use_shopify_feeds: bool = True
+    max_image_fetches: int = 12      # product pages opened only to find a picture for the final results
     expand_per_round: int = 6
     domains_per_round: int = 10
     providers_per_domain: int = 2

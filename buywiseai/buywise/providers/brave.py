@@ -27,6 +27,7 @@ class BraveProvider(SearchProvider):
             params={"q": self.site_query(query, domain), "country": "pk", "count": min(num, 20)},
         )
         return [
-            RawResult(title=it.get("title", ""), url=it.get("url", ""), snippet=it.get("description", ""), provider=self.name)
+            RawResult(title=it.get("title", ""), url=it.get("url", ""), snippet=it.get("description", ""), provider=self.name,
+                      image_url=(it.get("thumbnail") or {}).get("src"))
             for it in data.get("web", {}).get("results", [])
         ]

@@ -1,7 +1,16 @@
 from types import SimpleNamespace as NS
 
-from buywise.agents.judge import judge_relevance
+import pytest
+
+from buywise.agents.judge import _VERDICTS, judge_relevance
 from buywise.llm import LLMError
+
+
+@pytest.fixture(autouse=True)
+def _fresh_cache():
+    _VERDICTS.clear()
+    yield
+    _VERDICTS.clear()
 
 
 class FakeLLM:
@@ -40,3 +49,30 @@ def test_fails_open():
     assert judge_relevance(ITEMS(), "q", FakeLLM(avail=False))[1] == 0
     assert judge_relevance(ITEMS(), "q", FakeLLM({"garbage": 1}))[1] == 0
     assert len(judge_relevance(ITEMS(), "q", FakeLLM({"items": [{"id": "x"}]}))[0]) == 3
+
+
+def test_verdicts_are_cached_between_rounds():
+    calls = []
+
+    class Counting(FakeLLM):
+        def chat_json(self, *a, **k):
+            calls.append(1)
+            return super().chat_json(*a, **k)
+
+    llm = Counting({"items": [{"id": 0, "match": True}, {"id": 1, "match": False}, {"id": 2, "match": True}]})
+    first, d1 = judge_relevance(ITEMS(), "shalwar kameez", llm)
+    second, d2 = judge_relevance(ITEMS(), "shalwar kameez", llm)
+    assert len(calls) == 1 and d1 == d2 == 1 and len(first) == len(second) == 2
+
+
+def test_rate_limit_keeps_cached_verdicts_and_does_not_retry():
+    calls = []
+
+    class Limited(FakeLLM):
+        def chat_json(self, *a, **k):
+            calls.append(1)
+            raise LLMError("Groq rate limit reached (token cap): AI steps paused ~7 min")
+
+    kept, dropped = judge_relevance(ITEMS(), "q", Limited())
+    assert len(kept) == 3 and dropped == 0 and len(calls) == 1          # no second, bigger attempt
+    assert "RATE-LIMITED" in judge_relevance.last_status

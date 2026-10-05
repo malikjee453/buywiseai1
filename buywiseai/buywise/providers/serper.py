@@ -23,6 +23,7 @@ class SerperProvider(SearchProvider):
             out.append(RawResult(
                 title=it.get("title", ""), url=it.get("link", ""), snippet=it.get("snippet", ""),
                 price_text=price_text_from(it), rating=it.get("rating"), provider=self.name,
+                image_url=it.get("imageUrl") or it.get("thumbnailUrl"),
             ))
         return out
 
@@ -33,5 +34,6 @@ class SerperProvider(SearchProvider):
             out.append(RawResult(
                 title=it.get("title", ""), url=it.get("link", ""), price_text=it.get("price"),
                 source=it.get("source"), rating=it.get("rating"), provider=self.name, from_shopping=True,
+                image_url=it.get("imageUrl"),
             ))
         return out

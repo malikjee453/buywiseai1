@@ -28,7 +28,8 @@ class SerpApiProvider(SearchProvider):
     def search(self, query, domain=None, num=10):
         data = self._get({"engine": "google", "q": self.site_query(query, domain), "gl": "pk", "hl": "en", "num": num})
         return [
-            RawResult(title=it.get("title", ""), url=it.get("link", ""), snippet=it.get("snippet", ""), provider=self.name)
+            RawResult(title=it.get("title", ""), url=it.get("link", ""), snippet=it.get("snippet", ""), provider=self.name,
+                      image_url=it.get("thumbnail"))
             for it in data.get("organic_results", [])
         ]
 
@@ -51,6 +52,7 @@ class SerpApiProvider(SearchProvider):
                 title=it.get("title", ""), url=it.get("product_link") or it.get("link", ""),
                 price_text=it.get("price"), price=it.get("extracted_price"),
                 source=it.get("source"), rating=it.get("rating"), provider=self.name, from_shopping=True,
+                image_url=it.get("thumbnail"),
             ))
         return out
 
@@ -73,6 +75,7 @@ class SerpApiBingProvider(SearchProvider):
             # Optional params may be rejected; retry once with the bare minimum.
             data = serpapi_get({"engine": "bing", "q": q, "api_key": self.key})
         return [
-            RawResult(title=it.get("title", ""), url=it.get("link", ""), snippet=it.get("snippet", ""), provider=self.name)
+            RawResult(title=it.get("title", ""), url=it.get("link", ""), snippet=it.get("snippet", ""), provider=self.name,
+                      image_url=it.get("thumbnail"))
             for it in data.get("organic_results", [])
         ]

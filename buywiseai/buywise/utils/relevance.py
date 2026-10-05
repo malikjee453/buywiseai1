@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import statistics
+from urllib.parse import urlparse
 
 from buywise.config import load_app_settings
 
@@ -11,15 +12,21 @@ def _has_word(text: str, word: str) -> bool:
     return re.search(r"(?<![a-z0-9])" + re.escape(word.lower()) + r"(?![a-z0-9])", text.lower()) is not None
 
 
-def is_accessory(title: str, query: str) -> bool:
-    """True if the title looks like an accessory the user did not ask for.
+def is_accessory(title: str, query: str, url: str = "") -> bool:
+    """True if the title (or URL slug) looks like an accessory the user did not ask for.
 
     "... with charger" / "... with case" describe what is in the box, so they are ignored.
+    The URL slug is checked too because search titles are often truncated before the word 'case'.
     """
-    checked = re.sub(r"\bwith\s+(?:a\s+|free\s+|original\s+)?[a-z]+", " ", title.lower())
-    for word in load_app_settings().get("accessory_words", []):
-        if _has_word_pl(checked, word) and not _has_word_pl(query, word):
-            return True
+    texts = [title.lower()]
+    if url:
+        texts.append(re.sub(r"[^a-z0-9]+", " ", urlparse(url).path.lower()))
+    words = load_app_settings().get("accessory_words", [])
+    for text in texts:
+        checked = re.sub(r"\bwith\s+(?:a\s+|free\s+|original\s+)?[a-z]+", " ", text)
+        for word in words:
+            if _has_word_pl(checked, word) and not _has_word_pl(query, word):
+                return True
     return False
 
 
@@ -47,17 +54,46 @@ def model_tokens(query: str) -> list[str]:
     return [t for t in toks if t.isdigit() and len(t) <= 3]
 
 
-def title_matches_model(title: str, url: str, query: str) -> bool:
-    """True if every model token of the query appears in the title or URL path.
+_VARIANT_WORDS = {"pro", "max", "plus", "ultra", "mini", "lite", "fe", "se", "air", "fold", "flip"}
+_PREV_STOP = {"for", "the", "and", "with", "new", "buy", "best", "pro", "max", "plus"}
 
-    Stops 'Galaxy A57', 'A54' or a smartwatch from passing as 'Galaxy A55'.
+
+def _variant_conflict(t_seq: list[str], p_seq: list[str], required: list[str], query: str) -> bool:
+    """'iPhone 13 Pro Max' / 'Galaxy S24 FE' when the user asked for plain 'iPhone 13' / 'Galaxy S24'."""
+    asked = set(_tokens(query))
+    for seq in (t_seq, p_seq):
+        for i in range(len(seq) - 1):
+            if seq[i] in required and seq[i + 1] in _VARIANT_WORDS and seq[i + 1] not in asked:
+                return True
+    return False
+
+
+def title_matches_model(title: str, url: str, query: str) -> bool:
+    """True if the listing is the model the query names (not a sibling model, variant or other device).
+
+    Every model token must appear in the title or URL path; a variant word right after it ('13 Pro', 'S24 Ultra')
+    must have been asked for; and for a bare number ('iphone 13') the word before it ('iphone') must appear too,
+    so 'iPad Pro 13' cannot pass as 'iPhone 13'.
     """
     required = model_tokens(query)
     if not required:
         return True
     path = url.split("?")[0].split("//", 1)[-1]
-    hay = set(_tokens(title)) | set(_tokens(path))
-    return all(t in hay for t in required)
+    t_seq, p_seq = _tokens(title), _tokens(path)
+    hay = set(t_seq) | set(p_seq)
+    if not all(t in hay for t in required):
+        return False
+    if _variant_conflict(t_seq, p_seq, required, query):
+        return False
+    qtoks = _tokens(re.sub(r"\d+\.\d+", " ", query))
+    joined = "".join(t_seq + p_seq)
+    for t in required:
+        if t.isdigit() and t in qtoks:
+            idx = qtoks.index(t)
+            prev = qtoks[idx - 1] if idx > 0 else ""
+            if prev.isalpha() and len(prev) >= 3 and prev not in _PREV_STOP and prev not in joined:
+                return False
+    return True
 
 
 def median_price(prices: list[float]) -> float | None:

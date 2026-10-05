@@ -21,7 +21,7 @@ CACHE_TTL = 30 * 60
 AGENT_LABELS = {
     "understand": "🧠 Query understanding", "search": "🔎 Search agents", "extract": "🧾 Extraction",
     "rag": "📚 RAG retrieval + rerank", "enrich": "🌐 Page metadata", "verify": "✅ Verification + coverage",
-    "recommend": "💡 Recommendation",
+    "images": "🖼️ Product images", "recommend": "💡 Recommendation",
 }
 
 
@@ -181,7 +181,14 @@ if result:
             if view == "Cards":
                 for l in shown:
                     with st.container(border=True):
-                        a, b, c, d = st.columns([5, 2, 2, 1.3])
+                        img, a, b, c, d = st.columns([1.3, 4.5, 2, 2, 1.3])
+                        if l.image_url:
+                            try:
+                                img.image(l.image_url, width=110)
+                            except Exception:          # a bad image must never break the results page
+                                img.caption("🖼️ image unavailable")
+                        else:
+                            img.caption("🖼️ no image")
                         a.markdown(f"**{l.title}**")
                         for n in l.notes:
                             a.caption(f"⚠️ {n}")
@@ -195,15 +202,16 @@ if result:
                         d.link_button("Open ↗", l.url, use_container_width=True)
             else:
                 df = pd.DataFrame([{
-                    "Title": l.title, f"Price ({currency})": round(convert(l.price_pkr, "PKR", currency), 2),
+                    "Image": l.image_url, "Title": l.title, f"Price ({currency})": round(convert(l.price_pkr, "PKR", currency), 2),
                     "Source": l.source, "Trust": l.trust_score, "Rating": l.rating, "URL": l.url,
                     "Price source": ORIGIN_LABEL.get(l.price_origin, l.price_origin), "Notes": " | ".join(l.notes),
                 } for l in shown])
                 st.dataframe(df, use_container_width=True, hide_index=True,
-                             column_config={"URL": st.column_config.LinkColumn("URL", display_text="Open")})
+                             column_config={"URL": st.column_config.LinkColumn("URL", display_text="Open"),
+                                            "Image": st.column_config.ImageColumn("Image")})
             csv = pd.DataFrame([{
                 "title": l.title, "price_pkr": l.price_pkr, "original_price": l.price, "original_currency": l.currency,
-                "source": l.source, "url": l.url, "rating": l.rating, "notes": " | ".join(l.notes),
+                "source": l.source, "url": l.url, "image_url": l.image_url, "rating": l.rating, "notes": " | ".join(l.notes),
             } for l in shown]).to_csv(index=False).encode("utf-8")
             st.download_button("⬇️ Download CSV", csv, "buywiseai_results.csv", "text/csv")
 

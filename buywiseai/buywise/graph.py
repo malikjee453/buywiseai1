@@ -29,7 +29,7 @@ from buywise.providers import get_providers
 from buywise.rag.retriever import HybridRetriever
 from buywise.schemas import Listing, QueryPlan, RawResult
 from buywise.utils.currency import convert
-from buywise.utils.meta_fetch import collection_handle, fetch_collection_products, fetch_product_meta_ex
+from buywise.utils.meta_fetch import collection_handle, fetch_collection_products, fetch_product_page
 from buywise.utils.relevance import (gender_conflict, is_accessory, judge_query, lexical_match, normalize_word,
                                      title_matches_model)
 from buywise.utils.url_utils import dedupe, is_foreign_storefront, is_product_url, is_rankable
@@ -149,7 +149,8 @@ def n_expand(state: State) -> dict:
                         new.append(Listing(
                             title=it["title"], price=it["price"], currency="PKR", price_pkr=it["price"],
                             source=plat.name, domain=dom, url=it["url"], snippet=it["snippet"],
-                            trust_score=plat.trust_score, provider="shopify-feed", price_origin="shopify-feed"))
+                            trust_score=plat.trust_score, provider="shopify-feed", price_origin="shopify-feed",
+                            image_url=it.get("image")))
     pool = dedupe(_pool(state) + new)
     return {"pool": [l.model_dump() for l in pool], "expanded": sorted(done),
             "trace": [f"[Shopify feeds] {len(picked)} category pages (of {len(cands)} candidates) -> "
@@ -161,7 +162,7 @@ def n_rag(state: State) -> dict:
     retriever = HybridRetriever(use_dense=s.use_dense, use_reranker=s.use_reranker)
     pool = _pool(state)
     def _rankable(l: Listing) -> bool:     # same cheap rules verification applies, so nothing useful is lost
-        return (is_rankable(l) and (plan.used_ok or not is_accessory(l.title, plan.original))
+        return (is_rankable(l) and (plan.used_ok or not is_accessory(l.title, plan.original, l.url))
                 and not gender_conflict(l.title, l.url, plan.original)
                 and title_matches_model(l.title, l.url, plan.original))
     flags = [_rankable(l) for l in pool]
@@ -199,7 +200,7 @@ def n_enrich(state: State) -> dict:
             # (and anything past rerank_top is set to -99), so a plain word match must still earn a price lookup.
             if l.relevance < s.rerank_threshold and not lexical_match(l.title, l.url, l.snippet, plan.product, min_ratio=0.6):
                 continue
-            if (is_accessory(l.title, plan.original) or gender_conflict(l.title, l.url, plan.original)
+            if (is_accessory(l.title, plan.original, l.url) or gender_conflict(l.title, l.url, plan.original)
                     or not title_matches_model(l.title, l.url, plan.original)):
                 continue
             by_domain.setdefault(l.domain, []).append(l)
@@ -210,16 +211,16 @@ def n_enrich(state: State) -> dict:
             blocked = False
             for l in items:                       # one domain per worker => polite 1 req/s per site
                 if blocked:                       # robots.txt forbids this site: don't burn budget on its other pages
-                    out.append((l, None, "skipped"))
+                    out.append((l, None, "skipped", None))
                     continue
-                res = fetch_product_meta_ex(l.url)
-                out.append((l, *res))
-                blocked = res[1] in ("robots", "http_403")
+                page = fetch_product_page(l.url)
+                out.append((l, page["meta"], page["reason"], page["image"]))
+                blocked = page["reason"] in ("robots", "http_403")
             return out
 
         with ThreadPoolExecutor(max_workers=6) as ex:
             for batch in ex.map(work, by_domain.values()):
-                for l, meta, reason in batch:
+                for l, meta, reason, image in batch:
                     if reason == "skipped":
                         continue
                     if reason in ("robots", "http_403"):
@@ -228,6 +229,8 @@ def n_enrich(state: State) -> dict:
                         done.add(l.url)
                     reasons[reason] += 1
                     by_site.setdefault(l.domain, Counter())[reason] += 1
+                    if image and not l.image_url:
+                        l.image_url = image
                     if meta and meta[1] in ("PKR", "USD"):
                         l.price, l.currency, l.price_origin = meta[0], meta[1], "page-meta"
                         l.price_pkr = convert(meta[0], meta[1], "PKR")
@@ -236,6 +239,41 @@ def n_enrich(state: State) -> dict:
             "trace": [f"[Enrichment] {sum(reasons.values())} page lookups -> {fixed} price(s) found; "
                       f"outcomes: {dict(reasons) or 'none'} ({len(done)}/{s.max_meta_fetches} budget used)"]
             + (["   by site: " + "; ".join(f"{d} {dict(c)}" for d, c in sorted(by_site.items()))] if by_site else [])}
+
+
+def n_images(state: State) -> dict:
+    """Find a picture for final results that still lack one: open the product page politely (robots.txt-aware,
+    1 req/s per site) and read JSON-LD / og:image. Search thumbnails and store feeds were already used earlier."""
+    s = _settings(state)
+    selected = [Listing(**d) for d in state.get("selected", [])]
+    have = sum(1 for l in selected if l.image_url)
+    blocked_domains = set(state.get("robots_blocked", []))
+    todo = [l for l in selected if not l.image_url and "shopping_link" not in l.flags
+            and l.domain not in blocked_domains and l.url.startswith("http")][: max(s.max_image_fetches, 0)]
+    found = 0
+    if todo:
+        by_domain: dict[str, list[Listing]] = {}
+        for l in todo:
+            by_domain.setdefault(l.domain, []).append(l)
+
+        def work(items: list[Listing]):
+            out = []
+            for l in items:                               # one domain per worker => polite 1 req/s per site
+                page = fetch_product_page(l.url, image_only=True)
+                out.append((l, page["image"]))
+                if page["reason"] in ("robots", "http_403"):
+                    break
+            return out
+
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            for batch in ex.map(work, by_domain.values()):
+                for l, img in batch:
+                    if img:
+                        l.image_url = img
+                        found += 1
+    return {"selected": [l.model_dump() for l in selected],
+            "trace": [f"[Image agent] {have}/{len(selected)} results already had a picture; "
+                      f"opened {len(todo)} product page(s) and found {found} more"]}
 
 
 def n_verify(state: State) -> dict:
@@ -312,13 +350,14 @@ def get_graph():
         return wrapper
 
     for name, fn in [("understand", n_understand), ("search", n_search), ("extract", n_extract), ("expand", n_expand), ("rag", n_rag),
-                     ("enrich", n_enrich), ("verify", n_verify), ("recommend", n_recommend)]:
+                     ("enrich", n_enrich), ("verify", n_verify), ("images", n_images), ("recommend", n_recommend)]:
         g.add_node(name, timed(name, fn))
     g.set_entry_point("understand")
     for a, b in [("understand", "search"), ("search", "extract"), ("extract", "expand"), ("expand", "rag"), ("rag", "enrich"),
                  ("enrich", "verify")]:
         g.add_edge(a, b)
-    g.add_conditional_edges("verify", route, {"search": "search", "recommend": "recommend"})
+    g.add_conditional_edges("verify", route, {"search": "search", "recommend": "images"})
+    g.add_edge("images", "recommend")
     g.add_edge("recommend", END)
     return g.compile()
 

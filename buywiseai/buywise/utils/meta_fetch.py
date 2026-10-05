@@ -9,13 +9,14 @@ import json
 import logging
 import re
 import time
+from html import unescape
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
 
 import requests
 
 from buywise.utils.price_parser import parse_price
-from buywise.utils.url_utils import get_domain
+from buywise.utils.url_utils import clean_image_url, get_domain
 
 log = logging.getLogger(__name__)
 USER_AGENT = "BuyWiseAIBot/0.1 (price comparison; respects robots.txt)"
@@ -74,6 +75,48 @@ def parse_product_meta(html: str) -> tuple[float, str] | None:
             return float(amount.group(1).replace(",", "")), cur.group(1).upper()
         except ValueError:
             return None
+    return None
+
+
+_OG_IMG = re.compile(r'<meta[^>]+(?:property|name)=["\'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["\'][^>]*?content=["\']([^"\']+)["\']', re.I)
+_OG_IMG_REV = re.compile(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]*?(?:property|name)=["\'](?:og:image(?::secure_url)?|twitter:image(?::src)?)["\']', re.I)
+
+
+def _first_image(v):
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list):
+        for x in v:
+            r = _first_image(x)
+            if r:
+                return r
+    if isinstance(v, dict):
+        return _first_image(v.get("url") or v.get("contentUrl"))
+    return None
+
+
+def parse_product_image(html: str, base_url: str = "") -> str | None:
+    """Main product picture from JSON-LD Product.image, else og:image / twitter:image. Returns a safe https URL or None."""
+    for block in re.findall(r'<script[^>]+application/ld\+json[^>]*>(.*?)</script>', html, re.S | re.I):
+        try:
+            data = json.loads(block.strip())
+        except json.JSONDecodeError:
+            continue
+        for node in _walk(data):
+            if not isinstance(node, dict):
+                continue
+            t = node.get("@type")
+            types = [str(x).lower() for x in (t if isinstance(t, list) else [t])]
+            if "product" in types or "offers" in node:
+                img = clean_image_url(_first_image(node.get("image")), base_url or None)
+                if img:
+                    return img
+    for rx in (_OG_IMG, _OG_IMG_REV):
+        m = rx.search(html)
+        if m:
+            img = clean_image_url(unescape(m.group(1)), base_url or None)
+            if img:
+                return img
     return None
 
 
@@ -165,8 +208,13 @@ def feed_items(domain: str, products: list[dict]) -> list[dict]:
         if not prices or not handle or not title:
             continue
         bits = [p.get("product_type") or "", p.get("vendor") or "", ", ".join(_tags(p.get("tags"))[:8])]
+        img = (p.get("image") or {}).get("src") if isinstance(p.get("image"), dict) else None
+        if not img:
+            imgs = p.get("images") or []
+            first = imgs[0] if imgs else None
+            img = first.get("src") if isinstance(first, dict) else first if isinstance(first, str) else None
         out.append({"title": title, "url": f"https://{domain}/products/{handle}", "price": min(prices),
-                    "snippet": " | ".join(b for b in bits if b)[:300]})
+                    "snippet": " | ".join(b for b in bits if b)[:300], "image": clean_image_url(img)})
     return out
 
 
@@ -182,36 +230,63 @@ def price_from_product_json(data: dict) -> float | None:
     return items[0]["price"] if items else None
 
 
-def fetch_product_meta_ex(url: str) -> tuple[tuple[float, str] | None, str]:
-    """Returns (meta, reason). reason: ok | robots | http_<code> | no_price_in_page | error."""
+def fetch_product_page(url: str, image_only: bool = False) -> dict:
+    """One polite fetch -> {"meta": (price, currency) | None, "image": url | None, "reason": str}.
+
+    reason: ok | ok_daraz_json | ok_shopify_json | robots | http_<code> | no_price_in_page | error.
+    With image_only=True only the picture is looked for (no price parsing, no extra Shopify request).
+    """
+    out: dict = {"meta": None, "image": None, "reason": "error"}
     domain = get_domain(url)
     try:
         if not _allowed(url):
-            return None, "robots"
+            out["reason"] = "robots"
+            return out
         wait = 1.0 - (time.time() - _last_fetch.get(domain, 0.0))
         if wait > 0:
             time.sleep(wait)
         _last_fetch[domain] = time.time()
         r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=8)
         if r.status_code != 200:
-            return None, f"http_{r.status_code}"
-        meta = parse_product_meta(r.text)
+            out["reason"] = f"http_{r.status_code}"
+            return out
+        html = r.text[:2_000_000]
+        out["image"] = parse_product_image(html, url)
+        if image_only:
+            out["reason"] = "ok"
+            return out
+        meta = parse_product_meta(html)
         if meta:
-            return meta, "ok"
+            out.update(meta=meta, reason="ok")
+            return out
         if domain == "daraz.pk" or domain.endswith(".daraz.pk"):
-            meta = parse_daraz_embedded(r.text)
+            meta = parse_daraz_embedded(html)
             if meta:
-                return meta, "ok_daraz_json"
+                out.update(meta=meta, reason="ok_daraz_json")
+                return out
         handle = product_handle(url)
         if handle:                                   # Shopify-style product: try its public JSON
-            data, why = _get_json(f"https://{domain}/products/{handle}.json")
+            data, _why = _get_json(f"https://{domain}/products/{handle}.json")
             price = price_from_product_json(data) if data else None
+            if data and not out["image"]:
+                prod = data.get("product", data) if isinstance(data, dict) else {}
+                items = feed_items(domain, [prod]) if isinstance(prod, dict) else []
+                out["image"] = items[0]["image"] if items else None
             if price:
-                return (price, "PKR"), "ok_shopify_json"
-        return None, "no_price_in_page"
+                out.update(meta=(price, "PKR"), reason="ok_shopify_json")
+                return out
+        out["reason"] = "no_price_in_page"
+        return out
     except Exception as e:
-        log.info("meta fetch failed for %s: %s", url, e)
-        return None, "error"
+        log.info("page fetch failed for %s: %s", url, e)
+        out["reason"] = f"error_{type(e).__name__}"      # e.g. error_ReadTimeout, error_SSLError
+        return out
+
+
+def fetch_product_meta_ex(url: str) -> tuple[tuple[float, str] | None, str]:
+    """Returns (meta, reason). Kept for callers that only need the price."""
+    page = fetch_product_page(url)
+    return page["meta"], page["reason"]
 
 
 def fetch_product_meta(url: str) -> tuple[float, str] | None:
