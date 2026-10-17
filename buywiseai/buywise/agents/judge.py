@@ -25,10 +25,13 @@ SYSTEM = (
     "audience as children if the query says kids/children/toddler/baby or gives an age. Reject listings that are "
     "clearly for the opposite gender. Never reject because of colour, fabric, style, embroidery, brand or price. "
     "Reject a different model or variant than the one named (e.g. Pro/Plus/Max when the base model is asked). "
-    'Respond with JSON only: {"items":[{"id":int,"match":true|false}]} covering every id.'
+    "Do not reject a listing just because its title is short, generic or ends with the store name. "
+    'Respond with JSON only: {"items":[{"id":int,"match":true|false,"why":"max 8 words, only when match is false"}]} '
+    "covering every id."
 )
 
 _VERDICTS: dict[tuple[str, str, str], bool] = {}
+_REASONS: dict[tuple[str, str, str], str] = {}
 
 
 def _slug(url: str) -> str:
@@ -63,7 +66,7 @@ def judge_relevance(listings: list, query: str, llm: LLM | None, max_items: int 
             for max_tok in (3000, 7000):      # reasoning tokens count against the limit: retry once with more headroom
                 try:
                     data = llm.chat_json(SYSTEM, f"User wants to buy: {query}\n\nListings:\n{payload}",
-                                         temperature=0.0, reasoning="low", max_tokens=max_tok)
+                                         temperature=0.0, reasoning="low", max_tokens=max_tok, timeout=25)
                     break
                 except LLMError as e:
                     err = e
@@ -78,11 +81,15 @@ def judge_relevance(listings: list, query: str, llm: LLM | None, max_items: int 
                     try:
                         i = int(it["id"])
                         if 0 <= i < len(todo):
-                            _VERDICTS[_key(query, todo[i])] = _truthy(it.get("match"))
+                            k = _key(query, todo[i])
+                            _VERDICTS[k] = _truthy(it.get("match"))
+                            if not _VERDICTS[k]:
+                                _REASONS[k] = str(it.get("why") or "")[:60]
                     except (KeyError, ValueError, TypeError):
                         continue
     kept_head = [l for l in head if _VERDICTS.get(_key(query, l), True)]   # unknown => keep
-    judge_relevance.last_dropped = [f"{l.title[:45]} ({l.source})" for l in head if not _VERDICTS.get(_key(query, l), True)]
+    judge_relevance.last_dropped = [f"{l.title[:45]} ({l.source}): {_REASONS.get(_key(query, l)) or 'no reason given'}"
+                                    for l in head if not _VERDICTS.get(_key(query, l), True)]
     dropped = len(head) - len(kept_head)
     judge_relevance.last_status = status or f"checked {len(head)} listings ({cached} from cache), rejected {dropped}"
     return kept_head + tail, dropped

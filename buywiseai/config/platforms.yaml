@@ -15,7 +15,7 @@
 - {name: iShopping, domain: ishopping.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
 - {name: Symbios, domain: symbios.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
 - {name: Vmart, domain: vmart.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
-- {name: WhatMobile, domain: whatmobile.com.pk, category: electronics, country: PK, currency: PKR, trust_score: 3}
+- {name: WhatMobile, domain: whatmobile.com.pk, category: electronics, country: PK, currency: PKR, trust_score: 3, max_results: 1}
 
 - {name: Khaadi, domain: khaadi.com, category: fashion, country: PK, currency: PKR, trust_score: 5}
 - {name: Outfitters, domain: outfitters.com.pk, category: fashion, country: PK, currency: PKR, trust_score: 4}

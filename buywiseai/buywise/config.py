@@ -38,6 +38,7 @@ class Platform:
     country: str = "PK"
     currency: str = "PKR"
     trust_score: int = 3
+    max_results: int | None = None      # e.g. 1 for reference sites that are not real stores
 
 
 @lru_cache(maxsize=1)
@@ -103,3 +104,5 @@ class RunSettings:
     expand_per_round: int = 6
     domains_per_round: int = 10
     providers_per_domain: int = 2
+    time_budget_s: int = 30             # stop starting new search rounds after this many seconds
+    allow_shopping_links: bool = False  # Google Shopping redirect links are not store URLs

@@ -1,0 +1,22 @@
+# Changes in this update (from a real 44-second Galaxy A06 trace)
+
+Speed
+- graph.py: `time_budget_s` (default 30 s, sidebar slider): no new search round starts after it; the per-platform cap is
+  relaxed on that last pass so the result target is still approached.
+- graph.py `n_enrich`: circuit breaker. A site whose first 2 page lookups fail with no success is not looked up again
+  (state key `lookup_stats`). Sites that work at least once are never switched off.
+- llm.py / extract.py / judge.py: optional per-call `timeout` (extraction 12 s, judge 25 s, no retries) so one slow
+  Groq call can't add ~10 s to a round.
+
+Quality
+- config/platforms.yaml + config.py + coverage.py: per-platform `max_results` (WhatMobile = 1; it is a spec site).
+- config/settings.yaml + url_utils.py: `non_product_url_patterns` reject news articles, picture galleries, `-vs-`
+  comparisons and `gateway.php` redirects as product pages.
+- verify.py / graph.py: Google Shopping redirect links (google.com/search?ibp=oshop...) are dropped unless
+  "Allow Google Shopping links" is on (default off). They are not store URLs.
+- judge.py: the judge now returns a short reason for each rejection; it shows in the trace
+  (`e.g. llm_wrong_product_type: <title> (<store>): <reason>`).
+- providers/ddg.py removed (unused).
+
+New settings: RunSettings.time_budget_s, RunSettings.allow_shopping_links, Platform.max_results.
+Tests: tests/test_speed_and_quality.py (8 new tests).

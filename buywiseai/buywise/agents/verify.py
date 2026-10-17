@@ -35,6 +35,8 @@ def verify_listings(pool: list[Listing], settings: RunSettings, plan: QueryPlan)
         l.notes = [n for n in l.notes if n == "Link goes via Google Shopping"]
         if not l.url.startswith("http"):
             _drop("invalid_url", l)
+        elif "shopping_link" in l.flags and not settings.allow_shopping_links:
+            _drop("google_link_not_store_url", l)     # a google.com redirect is not the store's own page
         elif is_foreign_storefront(l.domain):
             _drop("foreign_storefront", l)
         elif "shopping_link" not in l.flags and match_platform(l.domain) is None:

@@ -59,6 +59,9 @@ def is_product_url(url: str) -> bool:
     path = p.path.lower()
     if path in ("", "/"):
         return False
+    target = path + ("?" + p.query.lower() if p.query else "")
+    if any(re.search(pat, target) for pat in cfg.get("non_product_url_patterns", [])):
+        return False                      # news articles, picture galleries, comparison pages, redirect gateways
     rule = _PRODUCT_PATH_RULES.get(_base_domain(domain))
     if rule:
         return re.search(rule, path) is not None

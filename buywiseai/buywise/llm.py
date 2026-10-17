@@ -72,6 +72,7 @@ class LLM:
         max_tokens: int = 3000,
         temperature: float | None = None,
         reasoning: str = "low",
+        timeout: float | None = None,
     ) -> str:
         """Single chat completion. `max_tokens` includes the model's reasoning tokens."""
         kwargs = dict(
@@ -86,6 +87,11 @@ class LLM:
         if rate_limited_now():                         # don't spend a request (or wait on retries) while capped
             raise _rate_limit_error()
         client = self._get_client()
+        if timeout is not None:                        # short, non-retried call so one slow request can't stall a search
+            try:
+                client = client.with_options(timeout=timeout, max_retries=0)
+            except AttributeError:
+                pass
         try:
             try:
                 resp = client.chat.completions.create(reasoning_effort=reasoning, **kwargs)

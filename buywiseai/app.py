@@ -96,6 +96,10 @@ per_store = st.sidebar.slider("Search engines used per store", 1, 3, 2,
                               help="Each engine call uses API credits. Lower = cheaper, higher = more coverage.")
 meta_max = st.sidebar.slider("Page price lookups per search", 0, 60, 40,
                              help="Fetches product pages (robots.txt-aware) when search snippets show no price.")
+time_budget = st.sidebar.slider("Max search time (seconds)", 15, 90, 30,
+                                help="No new search round starts after this. Lower = faster but fewer results.")
+allow_g = st.sidebar.toggle("Allow Google Shopping links", value=False,
+                            help="Off: only direct store URLs. Google Shopping results link to google.com, not to the store.")
 show_trace = st.sidebar.toggle("Show agent trace live", value=True)
 
 settings = RunSettings(
@@ -104,6 +108,7 @@ settings = RunSettings(
     providers=chosen_providers, categories=cats, platform_domains=[names[n] for n in chosen_platforms],
     include_aliexpress=inc_ali, exclude_olx=excl_olx, temperature=temperature,
     use_dense=use_dense, use_reranker=use_rerank, max_meta_fetches=meta_max, providers_per_domain=per_store, use_shopify_feeds=use_feeds,
+    time_budget_s=time_budget, allow_shopping_links=allow_g,
 )
 
 # ------------------------------------------------------------------ main

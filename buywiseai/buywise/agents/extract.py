@@ -107,7 +107,7 @@ def _llm_fill_prices(listings: list[Listing], llm: LLM | None) -> list[str]:
         return []
     payload = "\n".join(f'{i}. TITLE: {l.title}\n   TEXT: {l.snippet}' for i, l in enumerate(todo))
     try:
-        data = llm.chat_json(LLM_SYSTEM, payload, temperature=0.0, reasoning="low", max_tokens=2500)
+        data = llm.chat_json(LLM_SYSTEM, payload, temperature=0.0, reasoning="low", max_tokens=2500, timeout=12)
     except LLMError as e:
         return [f"LLM price extraction skipped ({e})"]
     filled = 0

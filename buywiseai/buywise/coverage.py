@@ -7,13 +7,15 @@ from __future__ import annotations
 from collections import Counter
 
 
-def select_results(valid: list, target: int, cap: int) -> list:
-    """Best-scoring listings first, at most `cap` per platform, up to `target`."""
+def select_results(valid: list, target: int, cap: int, caps: dict | None = None) -> list:
+    """Best-scoring listings first, at most `cap` per platform (a platform's own entry in `caps`
+    can only lower that, e.g. 1 for a reference site), up to `target`."""
+    caps = caps or {}
     ordered = sorted(valid, key=lambda l: l.score, reverse=True)
     counts: Counter = Counter()
     out = []
     for l in ordered:
-        if counts[l.source] >= cap:
+        if counts[l.source] >= min(cap, caps.get(l.source, cap)):
             continue
         counts[l.source] += 1
         out.append(l)

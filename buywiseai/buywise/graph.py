@@ -22,7 +22,7 @@ from buywise.agents.query import understand_query
 from buywise.agents.recommend import recommend
 from buywise.agents.search import active_platforms, pick_round_domains, prioritised_domains, run_search_round
 from buywise.agents.verify import verify_listings
-from buywise.config import RunSettings, match_platform
+from buywise.config import RunSettings, load_platforms, match_platform
 from buywise.coverage import coverage_status, next_step, select_results
 from buywise.llm import LLM
 from buywise.providers import get_providers
@@ -54,8 +54,24 @@ class State(TypedDict, total=False):
     best_status: dict
     stalled: bool
     expanded: list
+    started: float
+    lookup_stats: dict
+    stop_reason: str
     no_providers: bool
     trace: Annotated[list, operator.add]
+
+
+_DEAD_AFTER = 2     # a site whose first N page lookups all fail (and none worked) is not looked up again
+
+
+def _dead(stats: dict, domain: str) -> bool:
+    st = stats.get(domain)
+    return bool(st) and st.get("ok", 0) == 0 and st.get("fail", 0) >= _DEAD_AFTER
+
+
+def _caps() -> dict:
+    """Per-platform result caps from platforms.yaml (e.g. reference sites limited to 1 result)."""
+    return {p.name: p.max_results for p in load_platforms() if p.max_results}
 
 
 def _settings(state: State) -> RunSettings:
@@ -162,6 +178,8 @@ def n_rag(state: State) -> dict:
     retriever = HybridRetriever(use_dense=s.use_dense, use_reranker=s.use_reranker)
     pool = _pool(state)
     def _rankable(l: Listing) -> bool:     # same cheap rules verification applies, so nothing useful is lost
+        if "shopping_link" in l.flags and not s.allow_shopping_links:
+            return False
         return (is_rankable(l) and (plan.used_ok or not is_accessory(l.title, plan.original, l.url))
                 and not gender_conflict(l.title, l.url, plan.original)
                 and title_matches_model(l.title, l.url, plan.original))
@@ -182,6 +200,7 @@ def n_enrich(state: State) -> dict:
     s, plan = _settings(state), QueryPlan(**state["plan"])
     done = set(state.get("meta_fetched", []))
     blocked_domains = set(state.get("robots_blocked", []))
+    stats = {d: dict(v) for d, v in state.get("lookup_stats", {}).items()}
     allowance = min(s.max_meta_fetches - len(done), s.meta_fetches_per_round)
     pool, fixed, reasons = _pool(state), 0, Counter()
     by_site: dict[str, Counter] = {}
@@ -192,7 +211,7 @@ def n_enrich(state: State) -> dict:
             if picked >= allowance:
                 break
             if (l.price is not None or l.url in done or "shopping_link" in l.flags or is_foreign_storefront(l.domain)
-                    or l.domain in blocked_domains):
+                    or l.domain in blocked_domains or _dead(stats, l.domain)):
                 continue
             if not is_product_url(l.url):
                 continue
@@ -209,12 +228,15 @@ def n_enrich(state: State) -> dict:
         def work(items: list[Listing]):
             out = []
             blocked = False
+            prior = stats.get(items[0].domain, {})
+            oks, fails = prior.get("ok", 0), prior.get("fail", 0)
             for l in items:                       # one domain per worker => polite 1 req/s per site
-                if blocked:                       # robots.txt forbids this site: don't burn budget on its other pages
+                if blocked or (oks == 0 and fails >= _DEAD_AFTER):   # forbidden, or this site never gives a price
                     out.append((l, None, "skipped", None))
                     continue
                 page = fetch_product_page(l.url)
                 out.append((l, page["meta"], page["reason"], page["image"]))
+                oks, fails = (oks + 1, fails) if page["meta"] else (oks, fails + 1)
                 blocked = page["reason"] in ("robots", "http_403")
             return out
 
@@ -223,6 +245,8 @@ def n_enrich(state: State) -> dict:
                 for l, meta, reason, image in batch:
                     if reason == "skipped":
                         continue
+                    st_ = stats.setdefault(l.domain, {"ok": 0, "fail": 0})
+                    st_["ok" if meta else "fail"] += 1
                     if reason in ("robots", "http_403"):
                         blocked_domains.add(l.domain)     # remembered across rounds; costs no lookup budget
                     else:
@@ -236,6 +260,7 @@ def n_enrich(state: State) -> dict:
                         l.price_pkr = convert(meta[0], meta[1], "PKR")
                         fixed += 1
     return {"pool": [l.model_dump() for l in pool], "meta_fetched": sorted(done), "robots_blocked": sorted(blocked_domains),
+            "lookup_stats": stats,
             "trace": [f"[Enrichment] {sum(reasons.values())} page lookups -> {fixed} price(s) found; "
                       f"outcomes: {dict(reasons) or 'none'} ({len(done)}/{s.max_meta_fetches} budget used)"]
             + (["   by site: " + "; ".join(f"{d} {dict(c)}" for d, c in sorted(by_site.items()))] if by_site else [])}
@@ -279,21 +304,23 @@ def n_images(state: State) -> dict:
 def n_verify(state: State) -> dict:
     s, plan = _settings(state), QueryPlan(**state["plan"])
     valid, drops, samples = verify_listings(_pool(state), s, plan)
+    caps = _caps()
     judged_titles: list = []
     valid, n_judged = judge_relevance(valid, judge_query(plan.original), LLM(temperature=0.0))
     if n_judged:
         drops["llm_wrong_product_type"] = n_judged
         judged_titles = getattr(judge_relevance, "last_dropped", [])[:4]
-    selected = select_results(valid, s.target_results, s.per_platform_cap)
+    selected = select_results(valid, s.target_results, s.per_platform_cap, caps)
     status = coverage_status(selected, s.target_results, s.min_platforms)
     trace = [f"[Verification agent] {len(valid)} valid; dropped: {drops or 'none'}"]
     trace.append(f"   [LLM judge] {getattr(judge_relevance, 'last_status', 'n/a')}")
     for reason in ("not_product_page", "no_price", "model_mismatch", "low_relevance"):
         if samples.get(reason):
             trace.append(f"   e.g. {reason}: " + " | ".join(samples[reason]))
-    final_round = state.get("round", 1) >= s.max_rounds or state.get("no_providers")
+    over_budget = time.time() - state.get("started", time.time()) > s.time_budget_s
+    final_round = state.get("round", 1) >= s.max_rounds or state.get("no_providers") or over_budget
     if final_round and not status["ok"] and len(selected) < s.target_results:
-        relaxed = select_results(valid, s.target_results, s.per_platform_cap + 1)
+        relaxed = select_results(valid, s.target_results, s.per_platform_cap + 1, caps)
         if len(relaxed) > len(selected):
             selected = relaxed
             status = coverage_status(selected, s.target_results, s.min_platforms)
@@ -313,13 +340,16 @@ def n_verify(state: State) -> dict:
     stalled = state.get("round", 1) >= 2 and status["count"] <= state.get("last_count", -1)
     if stalled and not status["ok"]:
         trace.append("   no new verified results this round: stopping early instead of searching again")
+    stop = over_budget and not status["ok"]
+    if stop and state.get("round", 1) < s.max_rounds:
+        trace.append(f"   time budget of {s.time_budget_s}s reached: no further search rounds")
     return {"selected": [l.model_dump() for l in selected], "status": status, "last_count": status["count"],
             "best_selected": [l.model_dump() for l in selected], "best_status": status,
-            "stalled": stalled, "trace": trace}
+            "stalled": stalled, "stop_reason": "time budget" if stop else "", "trace": trace}
 
 
 def route(state: State) -> str:
-    if state.get("no_providers") or (state.get("stalled") and not state["status"]["ok"]):
+    if state.get("no_providers") or state.get("stop_reason") or (state.get("stalled") and not state["status"]["ok"]):
         return "recommend"
     return next_step(state["status"], state.get("round", 1), _settings(state).max_rounds)
 
@@ -364,7 +394,7 @@ def get_graph():
 
 def stream_pipeline(query: str, settings: RunSettings) -> Iterator[tuple[str, dict, dict]]:
     """Yield (node, update, accumulated_state) as each agent finishes."""
-    init: State = {"query": query, "settings": asdict(settings), "round": 0, "pool": [], "trace": []}
+    init: State = {"query": query, "settings": asdict(settings), "round": 0, "pool": [], "trace": [], "started": time.time()}
     final: dict = dict(init)
     for chunk in get_graph().stream(init, stream_mode="updates"):
         for node, update in chunk.items():
