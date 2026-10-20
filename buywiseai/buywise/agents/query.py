@@ -19,6 +19,8 @@ _KEYWORDS = {
                 "unstitched", "khussa", "bag", "jacket", "hoodie"],
     "grocery": ["rice", "oil", "ghee", "milk", "tea", "sugar", "flour", "atta", "biscuit", "juice", "snack"],
     "health": ["medicine", "tablet", "syrup", "vitamin", "supplement", "panadol", "mask", "thermometer"],
+    "beauty": ["skincare", "makeup", "lipstick", "foundation", "serum", "moisturizer", "moisturiser", "sunscreen",
+               "perfume", "fragrance", "shampoo", "conditioner", "eyeliner", "mascara", "cleanser", "toner", "kajal"],
     "home": ["sofa", "bed", "mattress", "furniture", "table", "chair", "wardrobe", "curtain", "carpet", "lamp"],
 }
 

@@ -20,3 +20,9 @@ Quality
 
 New settings: RunSettings.time_budget_s, RunSettings.allow_shopping_links, Platform.max_results.
 Tests: tests/test_speed_and_quality.py (8 new tests).
+
+# Added platforms (from the user's list)
+- Markaz (markaz.app) and Chase Value (chasevalue.pk): category `general`, trust 3. Searched every round, so each adds a few API calls.
+- Bagallery (bagallery.com): new category `beauty` (CATEGORIES, query-agent keywords), trust 4.
+- Not added: GrocerApp and Krave Mart (delivery apps; domains not verified), Telemart's telex.pk link (telemart.pk is already listed).
+- trust_score values are editorial guesses: edit config/platforms.yaml.

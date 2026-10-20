@@ -133,3 +133,21 @@ def test_time_budget_stops_further_rounds_and_relaxes_cap():
     assert len(r["selected"]) == 3                                      # cap relaxed 2 -> 3 so the target is approached
     r = g.n_verify({**base, "started": time.time()})
     assert r["stop_reason"] == "" and g.route({**base, **r}) == "search"
+
+
+# ---- new platforms from the user's list
+def test_new_platforms_are_whitelisted():
+    from buywise.config import match_platform
+    assert match_platform("markaz.app").name == "Markaz"
+    assert match_platform("www.chasevalue.pk".replace("www.", "")).name == "Chase Value"
+    assert match_platform("bagallery.com").category == "beauty"
+    assert match_platform("amazon.com") is None
+
+
+def test_beauty_queries_are_categorised_and_prioritised():
+    from buywise.agents.query import _heuristic
+    from buywise.agents.search import prioritised_domains
+    plan = _heuristic("vitamin c serum for face")
+    assert "beauty" in plan.categories
+    ordered = [p.domain for p in prioritised_domains(plan, list(load_platforms()))]
+    assert ordered.index("bagallery.com") < ordered.index("khaadi.com")      # beauty store before unrelated fashion

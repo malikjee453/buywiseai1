@@ -4,6 +4,8 @@
 - {name: AliExpress, domain: aliexpress.com, category: general, country: INTL, currency: USD, trust_score: 3}
 - {name: OLX Pakistan, domain: olx.com.pk, category: general, country: PK, currency: PKR, trust_score: 2}
 - {name: HomeShopping, domain: homeshopping.pk, category: general, country: PK, currency: PKR, trust_score: 3}
+- {name: Markaz, domain: markaz.app, category: general, country: PK, currency: PKR, trust_score: 3}
+- {name: Chase Value, domain: chasevalue.pk, category: general, country: PK, currency: PKR, trust_score: 3}
 - {name: Yayvo, domain: yayvo.com, category: general, country: PK, currency: PKR, trust_score: 3}
 
 - {name: PriceOye, domain: priceoye.pk, category: electronics, country: PK, currency: PKR, trust_score: 4}
@@ -35,3 +37,5 @@
 
 - {name: Interwood, domain: interwood.pk, category: home, country: PK, currency: PKR, trust_score: 4}
 - {name: Habitt, domain: habitt.com, category: home, country: PK, currency: PKR, trust_score: 4}
+
+- {name: Bagallery, domain: bagallery.com, category: beauty, country: PK, currency: PKR, trust_score: 4}

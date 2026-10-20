@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 ROOT = Path(__file__).resolve().parent.parent
-CATEGORIES = ["general", "electronics", "fashion", "grocery", "health", "home"]
+CATEGORIES = ["general", "electronics", "fashion", "grocery", "health", "home", "beauty"]
 
 
 def get_secret(name: str, default: str | None = None) -> str | None:
