@@ -53,6 +53,7 @@ def cache_key(query: str, s: RunSettings) -> str:
 
 # ------------------------------------------------------------------ sidebar
 st.sidebar.title("⚙️ Settings")
+search_status = st.sidebar.container()      # filled after a search: coverage message + "why not more results?"
 status = provider_status()
 if not get_secret("GROQ_API_KEY"):
     st.sidebar.error("GROQ_API_KEY missing: AI features fall back to simple heuristics.")
@@ -165,13 +166,15 @@ if result:
             st.caption("Why nothing was found (copy this text if you need help):")
             st.code(trace_text or "No trace available.", language="text")
         else:
-            if not stat.get("ok"):
-                st.warning(f"Target not met: found {stat.get('count', 0)} verified results from "
-                           f"{stat.get('platforms', 0)} platforms. Showing everything that passed verification.")
-                with st.expander("Why not more results? (copy this and send it for help)", expanded=True):
-                    st.code("\n".join(result.get("trace", [])) or "No trace.", language="text")
-            else:
-                st.success(f"{stat['count']} verified results from {stat['platforms']} platforms")
+            with search_status:                                   # shown in the sidebar, not above the results
+                if not stat.get("ok"):
+                    st.warning(f"Target not met: found {stat.get('count', 0)} verified results from "
+                               f"{stat.get('platforms', 0)} platforms. Showing everything that passed verification.")
+                    with st.expander("Why not more results? (copy this and send it for help)", expanded=False):
+                        st.code("\n".join(result.get("trace", [])) or "No trace.", language="text")
+                else:
+                    st.success(f"{stat['count']} verified results from {stat['platforms']} platforms")
+                st.divider()
             sort = st.radio("Sort by", ["Best match", "Lowest price", "Highest rating"], horizontal=True)
             view = st.radio("View", ["Cards", "Table"], horizontal=True)
             shown = list(selected)
