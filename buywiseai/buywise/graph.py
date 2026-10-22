@@ -55,6 +55,7 @@ class State(TypedDict, total=False):
     stalled: bool
     expanded: list
     started: float
+    round_started: float
     lookup_stats: dict
     stop_reason: str
     no_providers: bool
@@ -93,6 +94,7 @@ def n_understand(state: State) -> dict:
 
 
 def n_search(state: State) -> dict:
+    t_round = time.time()                 # a round = search + extract + rag + enrich + verify
     s, plan = _settings(state), QueryPlan(**state["plan"])
     rnd = state.get("round", 0) + 1
     providers = get_providers(s.providers)
@@ -104,7 +106,7 @@ def n_search(state: State) -> dict:
     variant = plan.variants[(rnd - 1) % len(plan.variants)]
     raws, trace = run_search_round(variant, domains, providers, s)
     names = ", ".join(p.name for p in providers)
-    return {"round": rnd, "raw": [r.model_dump() for r in raws],
+    return {"round": rnd, "round_started": t_round, "raw": [r.model_dump() for r in raws],
             "trace": [f"[Search agents] round {rnd}, query='{variant}', providers=[{names}]"] + [f"   {t}" for t in trace]}
 
 
@@ -317,7 +319,10 @@ def n_verify(state: State) -> dict:
     for reason in ("not_product_page", "no_price", "model_mismatch", "low_relevance"):
         if samples.get(reason):
             trace.append(f"   e.g. {reason}: " + " | ".join(samples[reason]))
-    over_budget = time.time() - state.get("started", time.time()) > s.time_budget_s
+    now = time.time()
+    elapsed, round_dur = now - state.get("started", now), now - state.get("round_started", now)
+    # Stop when over budget, or when another round of the same length would overshoot it by >25%
+    over_budget = elapsed > s.time_budget_s or elapsed + round_dur > s.time_budget_s * 1.25
     final_round = state.get("round", 1) >= s.max_rounds or state.get("no_providers") or over_budget
     if final_round and not status["ok"] and len(selected) < s.target_results:
         relaxed = select_results(valid, s.target_results, s.per_platform_cap + 1, caps)

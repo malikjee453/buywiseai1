@@ -6,7 +6,7 @@ from collections import Counter, defaultdict
 from buywise.config import RunSettings, match_platform
 from buywise.schemas import Listing, QueryPlan
 from buywise.utils.currency import convert
-from buywise.utils.relevance import lexical_match, is_accessory, is_price_outlier_low, median_price, title_matches_model, gender_conflict
+from buywise.utils.relevance import lexical_match, is_accessory, is_price_outlier_low, is_price_outlier_high, median_price, title_matches_model, gender_conflict
 from buywise.utils.url_utils import is_foreign_storefront, is_product_url
 
 
@@ -80,6 +80,13 @@ def verify_listings(pool: list[Listing], settings: RunSettings, plan: QueryPlan)
     # A far-below-median price that came only from a snippet/LLM (never confirmed on the product page) is
     # more likely a parsing slip, placeholder or bait price than a real offer: drop it. Page/API prices keep a warning.
     shaky = {id(l) for l in valid if "price_far_below_median" in l.flags and l.price_origin in ("text", "llm")}
+    # Same idea upwards: a snippet price 8x above the median (e.g. "Rs 276,780" for a panty, read from a
+    # '$1000' in the text) is a parsing slip. Prices confirmed on the page / API are kept.
+    for l in valid:
+        if l.price_pkr and l.price_origin in ("text", "llm") and is_price_outlier_high(l.price_pkr, med, len(valid)):
+            shaky.add(id(l))
+            if len(samples["unverified_price_outlier"]) < 3:
+                samples["unverified_price_outlier"].append(l.url)
     if shaky:
         drops["unverified_price_outlier"] = len(shaky)
         valid = [l for l in valid if id(l) not in shaky]

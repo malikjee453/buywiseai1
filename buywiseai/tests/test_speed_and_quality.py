@@ -151,3 +151,65 @@ def test_beauty_queries_are_categorised_and_prioritised():
     assert "beauty" in plan.categories
     ordered = [p.domain for p in prioritised_domains(plan, list(load_platforms()))]
     assert ordered.index("bagallery.com") < ordered.index("khaadi.com")      # beauty store before unrelated fashion
+
+
+# ---- from the "panty" trace
+def test_far_above_median_snippet_price_is_dropped():
+    """AliExpress 'Rs 276,780' for a panty came from a $1000 read out of snippet text."""
+    plan = QueryPlan(original="panty", product="panty")
+    doms = ["shophive.com", "telemart.pk", "czone.com.pk", "priceoye.pk", "markaz.app", "chasevalue.pk"]
+    ls = [L(i, price=800 + i * 50, price_pkr=800 + i * 50, price_origin="page-meta",
+            source=f"Store{i}", domain=d, url=f"https://{d}/products/p-{i}") for i, d in enumerate(doms)]
+    bad = L(9, title="Women panty set", price=1000.0, price_pkr=280000.0, currency="USD", price_origin="text",
+            source="AliExpress", domain="aliexpress.com", url="https://www.aliexpress.com/item/1005007170363843.html")
+    ok_expensive = L(8, title="Women panty luxury set", price=9000.0, price_pkr=9000.0, price_origin="page-meta",
+                     source="Daraz", domain="daraz.pk", url="https://www.daraz.pk/products/lux-i1.html")
+    for l in ls + [bad, ok_expensive]:
+        l.relevance = 1.0
+    valid, drops, _ = verify_listings(ls + [bad, ok_expensive], RunSettings(), plan)
+    assert bad not in valid and ok_expensive in valid          # only the unconfirmed snippet price is removed
+    assert drops.get("unverified_price_outlier") == 1
+    # a page-confirmed expensive price is never dropped, even if far above the median
+    bad.price_origin = "page-meta"
+    valid, _, _ = verify_listings(ls + [bad], RunSettings(), plan)
+    assert bad in valid
+
+
+def test_budget_prediction_stops_before_a_round_that_would_overshoot():
+    pool = [L(i, source=f"S{i}", domain=f"s{i}.pk", price=1000 + i, price_pkr=1000 + i,
+              url=f"https://s{i}.pk/products/p-{i}") for i in range(3)]
+    now = time.time()
+    # 29 s elapsed and the first round itself took 28 s: another round would end near 57 s > 30 s * 1.25
+    r = g.n_verify(_state(pool, round=1, last_count=-1, started=now - 29, round_started=now - 28))
+    assert r["stop_reason"] == "time budget" and g.route(_state(pool, round=1, **r)) == "recommend"
+    # a fast first round (7 s of 8 s elapsed) keeps searching
+    r = g.n_verify(_state(pool, round=1, last_count=-1, started=now - 8, round_started=now - 7))
+    assert r["stop_reason"] == ""
+
+
+def test_search_round_does_not_wait_for_stragglers():
+    """Real trace: 21 of 22 calls came back in ~2 s but the round still waited the full 15 s for one slow call."""
+    import buywise.agents.search as sa
+    from buywise.schemas import RawResult
+
+    plats = list(load_platforms())[:10]
+    slow_domain = plats[0].domain
+
+    class OneSlowDomain:
+        name, env_key, supports_shopping = "engine", None, False
+
+        def search(self, q, d, n):
+            if d == slow_domain:
+                time.sleep(6)
+            return [RawResult(title="t", url=f"https://{d}/products/a-i1.html")]
+
+    t = time.time()
+    orig, sa.GRACE_AFTER_80PCT_S = sa.GRACE_AFTER_80PCT_S, 0.5
+    try:
+        raws, trace = sa.run_search_round("q", plats, [OneSlowDomain()], RunSettings(providers_per_domain=1), deadline=20.0)
+    finally:
+        sa.GRACE_AFTER_80PCT_S = orig
+    took = time.time() - t
+    assert took < 3, took                                           # did not wait for the 6 s straggler
+    assert len(raws) == 9                                           # kept everything that arrived
+    assert any("1 slow call" in x and "engine" in x for x in trace), trace

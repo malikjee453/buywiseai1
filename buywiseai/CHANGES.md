@@ -26,3 +26,14 @@ Tests: tests/test_speed_and_quality.py (8 new tests).
 - Bagallery (bagallery.com): new category `beauty` (CATEGORIES, query-agent keywords), trust 4.
 - Not added: GrocerApp and Krave Mart (delivery apps; domains not verified), Telemart's telex.pk link (telemart.pk is already listed).
 - trust_score values are editorial guesses: edit config/platforms.yaml.
+
+# Fixes from the "panty" trace
+- search.py: a round no longer waits out the full 15 s deadline for a few slow calls. Once 80% of calls are back and
+  4 s have passed it stops waiting (GRACE_AFTER_80PCT_S); the trace now names the slow engines.
+  (Both rounds hit 15.0 s in the trace: that was most of the ~58 s total.)
+- graph.py: a new search round is not started if one more round of the same length would overshoot the time
+  budget by more than 25% (`round_started` in state). Previously a round could start at 28 s of a 30 s budget.
+- verify.py / relevance.py: a snippet- or LLM-derived price more than 8x the median is dropped
+  (`unverified_price_outlier`). Fixes "AliExpress Rs 276,780 for a panty" (a '$1000' read from text).
+  Prices confirmed on the product page or via API are never dropped by this rule.
+- Tests: 3 new regression tests in tests/test_speed_and_quality.py.

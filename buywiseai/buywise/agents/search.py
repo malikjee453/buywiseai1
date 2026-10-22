@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from concurrent.futures import TimeoutError as FuturesTimeout
+import time
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
 from buywise.config import Platform, RunSettings, load_platforms
 from buywise.providers.base import SearchProvider, disable_if_quota_error, is_disabled
@@ -65,6 +65,9 @@ def _tasks(domains: list[Platform], providers: list[SearchProvider], per_domain:
     return tasks
 
 
+GRACE_AFTER_80PCT_S = 4.0     # once 80% of calls finished, stop waiting for stragglers after this many seconds
+
+
 def run_search_round(
     query: str, domains: list[Platform], providers: list[SearchProvider], settings: RunSettings, max_workers: int = 16, deadline: float = 15.0,
 ) -> tuple[list[RawResult], list[str]]:
@@ -84,27 +87,39 @@ def run_search_round(
     pool = ThreadPoolExecutor(max_workers=max_workers)
     futures = {pool.submit(work, *t): t for t in tasks}
     timed_out = 0
+    slow_by: dict[str, int] = {}
+    t_start, total = time.time(), len(futures)
+    pending = set(futures)
     try:
-        for fut in as_completed(futures, timeout=deadline):   # one slow engine can't hold the whole round hostage
-            prov = futures[fut][0]
-            try:
-                raws.extend(fut.result())
-                ok_calls += 1
-            except Exception as e:
-                if disable_if_quota_error(prov.env_key, str(e)):
-                    quota_hit.add(prov.name)
-                errors[prov.name] = errors.get(prov.name, 0) + 1
-                first_err.setdefault(prov.name, redact_secrets(str(e))[:180])
-                log.warning("%s failed: %s", prov.name, e)
-    except FuturesTimeout:
-        timed_out = sum(1 for f in futures if not f.done())
+        while pending:
+            # poll, so the "stop waiting" rules below also fire while only slow calls are still pending
+            done, pending = wait(pending, timeout=0.25, return_when=FIRST_COMPLETED)
+            for fut in done:
+                prov = futures[fut][0]
+                try:
+                    raws.extend(fut.result())
+                    ok_calls += 1
+                except Exception as e:
+                    if disable_if_quota_error(prov.env_key, str(e)):
+                        quota_hit.add(prov.name)
+                    errors[prov.name] = errors.get(prov.name, 0) + 1
+                    first_err.setdefault(prov.name, redact_secrets(str(e))[:180])
+                    log.warning("%s failed: %s", prov.name, e)
+            elapsed = time.time() - t_start
+            # 80% of calls are back: stop waiting for stragglers after a short grace period (or at the hard deadline)
+            if pending and (elapsed > deadline or (total - len(pending) >= 0.8 * total and elapsed > GRACE_AFTER_80PCT_S)):
+                timed_out = len(pending)
+                for f in pending:
+                    slow_by[futures[f][0].name] = slow_by.get(futures[f][0].name, 0) + 1
+                break
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
     trace = [f"{len(tasks)} calls ({ok_calls} ok) on {len(domains)} domains -> {len(raws)} raw hits"]
     for name, n in errors.items():
         trace.append(f"provider '{name}': {n} failed call(s), e.g. {first_err.get(name, '?')}")
     if timed_out:
-        trace.append(f"{timed_out} slow call(s) abandoned after {deadline:.0f}s (kept the results that arrived)")
+        trace.append(f"{timed_out} slow call(s) abandoned after {time.time() - t_start:.0f}s "
+                     f"(kept the results that arrived); slow engines: {slow_by}")
     if quota_hit:
         trace.append(f"QUOTA EXHAUSTED for {sorted(quota_hit)}: switched off for 60 min. Top up the account or use other providers.")
     return raws, trace

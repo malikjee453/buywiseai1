@@ -101,6 +101,11 @@ def median_price(prices: list[float]) -> float | None:
     return statistics.median(prices) if prices else None
 
 
+def is_price_outlier_high(price: float, median: float | None, min_items: int, ratio: float = 8.0) -> bool:
+    """Flag prices far ABOVE the median (a parsing slip such as '1000 sold' read as $1000)."""
+    return bool(median) and min_items >= 5 and price > ratio * median
+
+
 def is_price_outlier_low(price: float, median: float | None, min_items: int, ratio: float = 0.4) -> bool:
     """Flag prices far below the median (possible used item / accessory / scam)."""
     return bool(median) and min_items >= 4 and price < ratio * median
