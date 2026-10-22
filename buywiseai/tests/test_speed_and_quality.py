@@ -213,3 +213,63 @@ def test_search_round_does_not_wait_for_stragglers():
     assert took < 3, took                                           # did not wait for the 6 s straggler
     assert len(raws) == 9                                           # kept everything that arrived
     assert any("1 slow call" in x and "engine" in x for x in trace), trace
+
+
+# ---- from the "shalwar kameez for girls" trace
+def test_fashion_query_searches_all_fashion_stores_in_round_one():
+    """7 general stores used to crowd out 4 of the 7 fashion stores, and the time budget then skipped round 2."""
+    from buywise.agents.search import pick_round_domains, prioritised_domains
+    from buywise.agents.query import _heuristic
+    plan = _heuristic("shalwar kameez for girls")
+    assert "fashion" in plan.categories
+    ordered = prioritised_domains(plan, list(load_platforms()))
+    round1 = {p.domain for p in pick_round_domains(ordered, 1, 10)}
+    fashion = {p.domain for p in load_platforms() if p.category == "fashion"}
+    assert fashion <= round1, fashion - round1                      # every fashion store is searched in round 1
+    assert {"daraz.pk", "aliexpress.com", "olx.com.pk"} <= round1   # anchors always included
+    assert {"chasevalue.pk", "markaz.app"} <= round1                # general stores that sell clothes too
+    assert len(round1) <= 13                                        # not a bigger (slower) round than before
+
+
+def test_electronics_query_does_not_pull_in_fashion_stores():
+    from buywise.agents.search import pick_round_domains, prioritised_domains
+    from buywise.agents.query import _heuristic
+    ordered = prioritised_domains(_heuristic("samsung galaxy a06"), list(load_platforms()))
+    round1 = {p.domain for p in pick_round_domains(ordered, 1, 10)}
+    assert {"priceoye.pk", "telemart.pk", "shophive.com", "czone.com.pk"} <= round1
+    assert "khaadi.com" not in round1
+
+
+def test_same_price_different_products_are_not_merged():
+    """A store feed lists many different suits at the same price; only near-identical titles are one offer."""
+    plan = QueryPlan(original="shalwar kameez for girls", product="shalwar kameez")
+    titles = ["Girls Embroidered Lawn Suit Pink", "Kids Printed Cotton Kameez Blue", "Girls Chiffon Party Frock Maroon",
+              "Girls Khaddar Winter Shalwar Kameez Grey"]
+    ls = [L(i, title=t, price=1999.0, price_pkr=1999.0, url=f"https://chasevalue.pk/products/p-{i}",
+            domain="chasevalue.pk", source="Chase Value") for i, t in enumerate(titles)]
+    twin = L(9, title="Girls Embroidered Lawn Suit Pink", price=1999.0, price_pkr=1999.0,
+             url="https://chasevalue.pk/products/p-9-copy", domain="chasevalue.pk", source="Chase Value")
+    for l in ls + [twin]:
+        l.relevance = 1.0
+    valid, drops, _ = verify_listings(ls + [twin], RunSettings(), plan)
+    assert len(valid) == 4 and drops.get("duplicate_offer") == 1     # the twin is merged, the 4 distinct products are kept
+
+
+def test_enrichment_lookups_are_capped_per_site():
+    calls = []
+
+    def fake_page(url, image_only=False):
+        calls.append(url)
+        return {"meta": (1000.0, "PKR"), "image": None, "reason": "ok"}
+
+    pool = [L(i, source="Markaz", domain="markaz.app", price=None, price_pkr=None,
+              url=f"https://www.markaz.app/shop/product/girls-shalwar-kameez-{i}") for i in range(8)]
+    pool += [L(20 + i, source="Chase Value", domain="chasevalue.pk", price=None, price_pkr=None,
+               url=f"https://chasevalue.pk/products/girls-shalwar-kameez-{i}") for i in range(2)]
+    orig, g.fetch_product_page = g.fetch_product_page, fake_page
+    try:
+        g.n_enrich(_state(pool))
+        assert sum("markaz" in u for u in calls) == RunSettings().per_platform_cap + 2     # 4, not 8
+        assert sum("chasevalue" in u for u in calls) == 2                                 # the other site still gets its turn
+    finally:
+        g.fetch_product_page = orig

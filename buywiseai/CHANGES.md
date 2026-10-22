@@ -37,3 +37,15 @@ Tests: tests/test_speed_and_quality.py (8 new tests).
   (`unverified_price_outlier`). Fixes "AliExpress Rs 276,780 for a panty" (a '$1000' read from text).
   Prices confirmed on the product page or via API are never dropped by this rule.
 - Tests: 3 new regression tests in tests/test_speed_and_quality.py.
+
+# Fixes from the "shalwar kameez for girls" trace
+- search.py + platforms.yaml + config.py: store ordering. Round 1 searched all 7 general stores but only 3 of the 7
+  fashion stores (adding Markaz/Chase Value made it worse), and the time budget then skipped round 2.
+  Now: anchors (Daraz, AliExpress, OLX: `anchor: true`) are searched every round, and stores relevant to the query's
+  category come first (`category` or the new `also:` list, e.g. Markaz/Chase Value also count for fashion/beauty/home).
+  Round 1 = 3 anchors + the best 9 others (12 stores).
+- verify.py: `duplicate_offer` no longer merges every product that shares a store and a price (92 were merged
+  in one run). Only near-identical titles (word overlap >= 60%) count as one offer.
+- graph.py `n_enrich`: at most `per_platform_cap + 2` page lookups per store per round (Markaz took 6 of 13 lookups
+  and most of the 19.3 s), since results are capped per store anyway.
+- Tests: 4 new regression tests (tests/test_speed_and_quality.py).

@@ -39,6 +39,8 @@ class Platform:
     currency: str = "PKR"
     trust_score: int = 3
     max_results: int | None = None      # e.g. 1 for reference sites that are not real stores
+    anchor: bool = False                # always searched every round (the big marketplaces)
+    also: tuple = ()                    # extra categories a general store is relevant for, e.g. (fashion, beauty)
 
 
 @lru_cache(maxsize=1)
@@ -51,7 +53,7 @@ def load_app_settings() -> dict:
 def load_platforms() -> tuple[Platform, ...]:
     with open(ROOT / "config" / "platforms.yaml", encoding="utf-8") as f:
         rows = yaml.safe_load(f) or []
-    return tuple(Platform(**row) for row in rows)
+    return tuple(Platform(**{**row, "also": tuple(row.get("also", ()))}) for row in rows)
 
 
 def match_platform(domain: str, platforms=None) -> Platform | None:

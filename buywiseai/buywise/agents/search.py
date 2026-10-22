@@ -28,21 +28,32 @@ def active_platforms(settings: RunSettings) -> list[Platform]:
 
 
 def prioritised_domains(plan: QueryPlan, platforms: list[Platform]) -> list[Platform]:
-    """General platforms + AliExpress first, then relevant categories, then the rest."""
+    """Anchors (Daraz, AliExpress, OLX) and stores relevant to the query's categories first, then other
+    general stores, then the rest. (A long list of general stores must not crowd out the category stores:
+    a fashion query used to search 7 general stores and only 3 of the 7 fashion stores.)"""
+    wanted = set(plan.categories) - {"general"}
+
     def rank(p: Platform) -> tuple:
+        relevant = p.category in wanted or bool(wanted & set(p.also))
+        if p.anchor or relevant:
+            return (0, -p.trust_score, p.name.lower())
         if p.category == "general":
-            return (0, -p.trust_score)
-        if p.category in plan.categories:
-            return (1, -p.trust_score)
-        return (2, -p.trust_score)
+            return (1, -p.trust_score, p.name.lower())
+        return (2, -p.trust_score, p.name.lower())
     return sorted(platforms, key=rank)
 
 
 def pick_round_domains(ordered: list[Platform], round_no: int, per_round: int) -> list[Platform]:
-    """Round 1 = top N; later rounds shift the window and always keep general platforms."""
-    start = (round_no - 1) * per_round // 2
-    window = ordered[start:start + per_round] or ordered[:per_round]
-    core = [p for p in ordered if p.category == "general"]
+    """Anchor marketplaces every round, plus a window of the best-ordered other stores.
+
+    Round 1 takes the top of the list; later rounds slide the window (half a window per round) so new stores
+    are tried. Anchors are extra: they do not use up window slots (round 1 = anchors + per_round-1 others).
+    """
+    core = [p for p in ordered if p.anchor]
+    rest = [p for p in ordered if not p.anchor]
+    size = max(per_round - 1, 1)
+    start = (round_no - 1) * size // 2
+    window = rest[start:start + size] or rest[:size]
     seen, out = set(), []
     for p in core + window:
         if p.domain not in seen:

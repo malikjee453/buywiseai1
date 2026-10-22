@@ -1,6 +1,7 @@
 """Verification Agent: drop invalid listings, flag suspicious ones. Never invents data."""
 from __future__ import annotations
 
+import re
 from collections import Counter, defaultdict
 
 from buywise.config import RunSettings, match_platform
@@ -8,6 +9,11 @@ from buywise.schemas import Listing, QueryPlan
 from buywise.utils.currency import convert
 from buywise.utils.relevance import lexical_match, is_accessory, is_price_outlier_low, is_price_outlier_high, median_price, title_matches_model, gender_conflict
 from buywise.utils.url_utils import is_foreign_storefront, is_product_url
+
+
+def _similar_titles(a: str, b: str, min_jaccard: float = 0.6) -> bool:
+    ta, tb = set(re.findall(r"[a-z0-9]+", a.lower())), set(re.findall(r"[a-z0-9]+", b.lower()))
+    return bool(ta and tb) and len(ta & tb) / len(ta | tb) >= min_jaccard
 
 
 def _price_bounds_pkr(settings: RunSettings, plan: QueryPlan) -> tuple[float | None, float | None]:
@@ -60,14 +66,17 @@ def verify_listings(pool: list[Listing], settings: RunSettings, plan: QueryPlan)
         else:
             valid.append(l)
     # Same store + same price + same model = the same offer reached via different pages
-    best: dict[tuple, Listing] = {}
-    for l in valid:
-        k = (l.domain, round(l.price_pkr or 0))
-        if k not in best or l.score > best[k].score:
-            best[k] = l
-    if len(best) < len(valid):
-        drops["duplicate_offer"] += len(valid) - len(best)
-        valid = [l for l in valid if best[(l.domain, round(l.price_pkr or 0))] is l]
+    # ...but a store's feed lists many DIFFERENT products at the same price (e.g. 92 were merged in one run),
+    # so only treat them as one offer when their titles are also near-identical.
+    kept: list[Listing] = []
+    for l in sorted(valid, key=lambda x: x.score, reverse=True):
+        if any(k.domain == l.domain and round(k.price_pkr or 0) == round(l.price_pkr or 0)
+               and _similar_titles(k.title, l.title) for k in kept):
+            drops["duplicate_offer"] += 1
+            continue
+        kept.append(l)
+    keep_ids = {id(k) for k in kept}
+    valid = [l for l in valid if id(l) in keep_ids]
     med = median_price([l.price_pkr for l in valid if l.price_pkr])
     for l in valid:
         if l.price_pkr and is_price_outlier_low(l.price_pkr, med, len(valid)):

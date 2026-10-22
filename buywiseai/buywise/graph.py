@@ -217,6 +217,8 @@ def n_enrich(state: State) -> dict:
                 continue
             if not is_product_url(l.url):
                 continue
+            if len(by_domain.get(l.domain, [])) >= s.per_platform_cap + 2:     # results are capped per store anyway
+                continue
             # Same rescue rule verification uses: the cross-encoder under-scores short hobby/electronics titles
             # (and anything past rerank_top is set to -99), so a plain word match must still earn a price lookup.
             if l.relevance < s.rerank_threshold and not lexical_match(l.title, l.url, l.snippet, plan.product, min_ratio=0.6):

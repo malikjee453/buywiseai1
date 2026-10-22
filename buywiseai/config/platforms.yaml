@@ -1,11 +1,11 @@
 # Whitelist of platforms BuyWiseAI may return. Edit freely - no code changes needed.
 # trust_score is YOUR editorial rating (1-5), not an official metric.
-- {name: Daraz, domain: daraz.pk, category: general, country: PK, currency: PKR, trust_score: 4}
-- {name: AliExpress, domain: aliexpress.com, category: general, country: INTL, currency: USD, trust_score: 3}
-- {name: OLX Pakistan, domain: olx.com.pk, category: general, country: PK, currency: PKR, trust_score: 2}
+- {name: Daraz, domain: daraz.pk, category: general, country: PK, currency: PKR, trust_score: 4, anchor: true}
+- {name: AliExpress, domain: aliexpress.com, category: general, country: INTL, currency: USD, trust_score: 3, anchor: true}
+- {name: OLX Pakistan, domain: olx.com.pk, category: general, country: PK, currency: PKR, trust_score: 2, anchor: true}
 - {name: HomeShopping, domain: homeshopping.pk, category: general, country: PK, currency: PKR, trust_score: 3}
-- {name: Markaz, domain: markaz.app, category: general, country: PK, currency: PKR, trust_score: 3}
-- {name: Chase Value, domain: chasevalue.pk, category: general, country: PK, currency: PKR, trust_score: 3}
+- {name: Markaz, domain: markaz.app, category: general, country: PK, currency: PKR, trust_score: 3, also: [fashion, beauty, home]}
+- {name: Chase Value, domain: chasevalue.pk, category: general, country: PK, currency: PKR, trust_score: 3, also: [fashion, beauty, grocery, home]}
 - {name: Yayvo, domain: yayvo.com, category: general, country: PK, currency: PKR, trust_score: 3}
 
 - {name: PriceOye, domain: priceoye.pk, category: electronics, country: PK, currency: PKR, trust_score: 4}
