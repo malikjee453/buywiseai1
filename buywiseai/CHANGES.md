@@ -49,3 +49,21 @@ Tests: tests/test_speed_and_quality.py (8 new tests).
 - graph.py `n_enrich`: at most `per_platform_cap + 2` page lookups per store per round (Markaz took 6 of 13 lookups
   and most of the 19.3 s), since results are capped per store anyway.
 - Tests: 4 new regression tests (tests/test_speed_and_quality.py).
+
+# Fixes from the "samsung A06" trace
+- query.py: the LLM answered product='smartphone' for "samsung A06". Ranking, the relevance rescue and every later
+  search round use the product/variants, so real A06 pages were dropped as `low_relevance` (they were scored against
+  "smartphone") and round 2 searched the generic word "smartphone" for 10.6 s to gain one result.
+  Now: if the query has a model number (a06, s24, 15...), the product and every variant must contain it, otherwise the
+  product falls back to the user's wording and generic variants are removed. Queries without a model number are untouched.
+- search.py / graph.py: an engine that has 3+ calls abandoned in a round is skipped for the rest of that search
+  (SerpApi lost 5 calls in each of two rounds). At least one engine always stays. State key `slow_providers`.
+- Tests: 4 new regression tests (110 in total).
+
+# Fixes from the second "samsung a06" trace (categories = everything)
+- query.py: a category list with more than 3 specific categories is treated as "no preference". It happens when every
+  category is ticked in the sidebar, or the LLM returns them all. With everything "relevant", stores were ranked by trust
+  score alone, so a phone search queried fashion/grocery stores and never PriceOye/Telemart/Shophive/Czone (2 results, both Daraz).
+  The categories detected from the query are kept instead (note `category-filter-ignored` in the query-agent trace line).
+- settings.yaml: `_reviews` / `/reviews` pages (e.g. WhatMobile Reviews_60) are not product pages.
+- Tests: 4 new (114 in total).

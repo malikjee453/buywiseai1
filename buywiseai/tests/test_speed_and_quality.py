@@ -273,3 +273,107 @@ def test_enrichment_lookups_are_capped_per_site():
         assert sum("chasevalue" in u for u in calls) == 2                                 # the other site still gets its turn
     finally:
         g.fetch_product_page = orig
+
+
+# ---- from the "samsung A06" trace: the LLM generalised product to 'smartphone'
+class _FakeQueryLLM:
+    def __init__(self, reply):
+        self.reply = reply
+
+    def available(self):
+        return True
+
+    def chat_json(self, *a, **k):
+        return self.reply
+
+
+def test_llm_cannot_generalise_away_the_model_number():
+    from buywise.agents.query import understand_query
+    llm = _FakeQueryLLM({"product": "smartphone", "categories": ["electronics"],
+                         "variants": ["smartphone", "samsung mobile phone", "galaxy a06 price in pakistan"]})
+    plan, note = understand_query("samsung A06", RunSettings(), llm)
+    assert "a06" in plan.product.lower()                         # product fixed, not 'smartphone'
+    assert all("a06" in v.lower() for v in plan.variants), plan.variants   # no generic 'smartphone' search round
+    assert plan.variants[0] == "samsung A06"                     # the user's own wording stays first
+    assert "product-fixed" in note
+
+
+def test_good_llm_output_is_left_alone():
+    from buywise.agents.query import understand_query
+    llm = _FakeQueryLLM({"product": "Galaxy A06", "categories": ["electronics"],
+                         "variants": ["Samsung Galaxy A06", "A06 price in Pakistan"]})
+    plan, note = understand_query("samsung A06", RunSettings(), llm)
+    assert plan.product == "Galaxy A06" and "product-fixed" not in note
+
+
+def test_queries_without_a_model_number_are_not_constrained():
+    from buywise.agents.query import understand_query
+    llm = _FakeQueryLLM({"product": "ear buds", "categories": ["electronics"], "variants": ["wireless earphones"]})
+    plan, note = understand_query("wireless earbuds", RunSettings(), llm)
+    assert plan.product == "ear buds" and "wireless earphones" in plan.variants
+
+
+# ---- SerpApi abandoned 5 slow calls in EVERY round
+def test_repeatedly_slow_engine_is_skipped_in_later_rounds():
+    import buywise.agents.search as sa
+    seen = []
+
+    class P:
+        def __init__(self, name):
+            self.name = name
+
+    def fake_round(variant, domains, providers, settings):
+        seen.append([p.name for p in providers])
+        sa.record_slow({"serpapi": 5} if any(p.name == "serpapi" for p in providers) else {})
+        return [], ["0 calls"]
+
+    orig_gp, orig_rr = g.get_providers, g.run_search_round
+    g.get_providers, g.run_search_round = (lambda names=None: [P("serper"), P("serpapi")]), fake_round
+    try:
+        base = {"plan": QueryPlan(original="samsung A06", product="samsung A06", variants=["samsung A06", "a06 price"]).model_dump(),
+                "settings": asdict(RunSettings())}
+        r1 = g.n_search({**base, "round": 0})
+        assert seen[0] == ["serper", "serpapi"] and r1["slow_providers"] == ["serpapi"]
+        assert any("skipped for the rest of this search" in t for t in r1["trace"])
+        r2 = g.n_search({**base, "round": 1, "slow_providers": r1["slow_providers"]})
+        assert seen[1] == ["serper"]                                    # round 2 ran without the slow engine
+        # the only engine is never skipped, even if slow
+        g.get_providers = lambda names=None: [P("serpapi")]
+        r3 = g.n_search({**base, "round": 0})
+        assert seen[2] == ["serpapi"] and r3["slow_providers"] == []
+    finally:
+        g.get_providers, g.run_search_round = orig_gp, orig_rr
+
+
+# ---- from the "samsung a06" trace: every category was selected, so fashion/grocery stores were searched for a phone
+def test_all_categories_ticked_is_treated_as_no_preference():
+    from buywise.agents.query import understand_query
+    from buywise.agents.search import pick_round_domains, prioritised_domains
+    llm = _FakeQueryLLM({"product": "Samsung Galaxy A06", "categories": ["electronics"], "variants": ["samsung a06"]})
+    everything = ["beauty", "electronics", "fashion", "grocery", "health", "home"]
+    plan, note = understand_query("samsung a06", RunSettings(categories=everything), llm)
+    assert "category-filter-ignored" in note
+    assert set(plan.categories) == {"electronics", "general"}
+    round1 = {p.domain for p in pick_round_domains(prioritised_domains(plan, list(load_platforms())), 1, 10)}
+    assert {"priceoye.pk", "telemart.pk", "shophive.com", "czone.com.pk"} <= round1   # phone stores, not fashion
+    assert "khaadi.com" not in round1
+
+
+def test_llm_returning_every_category_falls_back_to_detected_ones():
+    from buywise.agents.query import understand_query
+    llm = _FakeQueryLLM({"product": "Samsung Galaxy A06", "variants": ["samsung a06"],
+                         "categories": ["beauty", "electronics", "fashion", "general", "grocery", "health", "home"]})
+    plan, _ = understand_query("samsung a06", RunSettings(), llm)
+    assert set(plan.categories) == {"electronics", "general"}
+
+
+def test_a_couple_of_ticked_categories_are_still_honoured():
+    from buywise.agents.query import understand_query
+    llm = _FakeQueryLLM({"product": "Samsung Galaxy A06", "categories": ["electronics"], "variants": ["samsung a06"]})
+    plan, note = understand_query("samsung a06", RunSettings(categories=["electronics", "home"]), llm)
+    assert set(plan.categories) == {"electronics", "home", "general"} and "ignored" not in note
+
+
+def test_review_pages_are_not_products():
+    assert not is_product_url("https://x.whatmobile.com.pk/Samsung_Galaxy-A06_Reviews_60")
+    assert is_product_url("https://www.whatmobile.com.pk/Samsung_Galaxy-A06")

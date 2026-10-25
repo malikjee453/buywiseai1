@@ -27,7 +27,7 @@ accessory_words:
 # URL path segments that identify search / category pages (never product pages)
 non_product_segments: [search, catalog, category, categories, tag, tags, brand, brands, browse, s, wholesale, collections, collection, pages, blogs, blog, stores, questions, reviews, news]
 # Regexes on the lowercase path (+query) of pages that are articles / pictures / comparisons, never a product page
-non_product_url_patterns: ['-news-\d+', 'gateway\.php', '_pictures', '-vs-', '_vs_', '/compare']
+non_product_url_patterns: ['-news-\d+', 'gateway\.php', '_pictures', '-vs-', '_vs_', '/compare', '_reviews', '/reviews']
 non_product_query_keys: [q, search, query, keyword, text, searchtext, k]
 
 # Tracking params removed during URL canonicalisation

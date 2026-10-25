@@ -20,7 +20,7 @@ from buywise.agents.extract import extract_listings
 from buywise.agents.judge import judge_relevance
 from buywise.agents.query import understand_query
 from buywise.agents.recommend import recommend
-from buywise.agents.search import active_platforms, pick_round_domains, prioritised_domains, run_search_round
+from buywise.agents.search import active_platforms, pick_round_domains, prioritised_domains, run_search_round, last_slow_engines
 from buywise.agents.verify import verify_listings
 from buywise.config import RunSettings, load_platforms, match_platform
 from buywise.coverage import coverage_status, next_step, select_results
@@ -55,6 +55,7 @@ class State(TypedDict, total=False):
     stalled: bool
     expanded: list
     started: float
+    slow_providers: list
     round_started: float
     lookup_stats: dict
     stop_reason: str
@@ -98,6 +99,9 @@ def n_search(state: State) -> dict:
     s, plan = _settings(state), QueryPlan(**state["plan"])
     rnd = state.get("round", 0) + 1
     providers = get_providers(s.providers)
+    slow_prev = set(state.get("slow_providers", []))
+    fast_only = [p for p in providers if p.name not in slow_prev]
+    providers = fast_only or providers                     # never end up with no engine at all
     if not providers:
         return {"round": rnd, "raw": [], "no_providers": True,
                 "trace": ["[Search agents] No search provider available: add at least one API key."]}
@@ -105,8 +109,12 @@ def n_search(state: State) -> dict:
     domains = pick_round_domains(ordered, rnd, s.domains_per_round)
     variant = plan.variants[(rnd - 1) % len(plan.variants)]
     raws, trace = run_search_round(variant, domains, providers, s)
+    slow_now = {n for n, c in last_slow_engines().items() if c >= 3}
+    if slow_now and len(providers) > len(slow_now):         # keep at least one engine
+        trace.append(f"engine(s) {sorted(slow_now)} keep timing out: skipped for the rest of this search")
+        slow_prev |= slow_now
     names = ", ".join(p.name for p in providers)
-    return {"round": rnd, "round_started": t_round, "raw": [r.model_dump() for r in raws],
+    return {"round": rnd, "round_started": t_round, "slow_providers": sorted(slow_prev), "raw": [r.model_dump() for r in raws],
             "trace": [f"[Search agents] round {rnd}, query='{variant}', providers=[{names}]"] + [f"   {t}" for t in trace]}
 
 

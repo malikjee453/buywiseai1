@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
@@ -41,6 +42,18 @@ def prioritised_domains(plan: QueryPlan, platforms: list[Platform]) -> list[Plat
             return (1, -p.trust_score, p.name.lower())
         return (2, -p.trust_score, p.name.lower())
     return sorted(platforms, key=rank)
+
+
+_tl = threading.local()
+
+
+def record_slow(slow_by: dict) -> None:
+    _tl.last_slow = dict(slow_by)
+
+
+def last_slow_engines() -> dict:
+    """{engine: abandoned calls} of the most recent run_search_round in this thread."""
+    return dict(getattr(_tl, "last_slow", {}))
 
 
 def pick_round_domains(ordered: list[Platform], round_no: int, per_round: int) -> list[Platform]:
@@ -125,6 +138,7 @@ def run_search_round(
                 break
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
+    record_slow(slow_by)
     trace = [f"{len(tasks)} calls ({ok_calls} ok) on {len(domains)} domains -> {len(raws)} raw hits"]
     for name, n in errors.items():
         trace.append(f"provider '{name}': {n} failed call(s), e.g. {first_err.get(name, '?')}")

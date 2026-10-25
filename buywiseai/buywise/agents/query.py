@@ -7,7 +7,7 @@ import re
 from buywise.config import CATEGORIES, RunSettings
 from buywise.llm import LLM, LLMError
 from buywise.schemas import QueryPlan
-from buywise.utils.relevance import drop_broader_variants, spelling_swap
+from buywise.utils.relevance import drop_broader_variants, model_tokens, spelling_swap
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +23,8 @@ _KEYWORDS = {
                "perfume", "fragrance", "shampoo", "conditioner", "eyeliner", "mascara", "cleanser", "toner", "kajal"],
     "home": ["sofa", "bed", "mattress", "furniture", "table", "chair", "wardrobe", "curtain", "carpet", "lamp"],
 }
+
+MAX_CATEGORIES = 3     # a query belongs to at most this many specific categories (plus 'general')
 
 SYSTEM = (
     "You are the query-understanding agent of a Pakistani shopping search engine. "
@@ -63,6 +65,8 @@ def understand_query(query: str, settings: RunSettings, llm: LLM | None = None) 
         try:
             data = llm.chat_json(SYSTEM, f"User query: {query}", temperature=0.0, reasoning="low")
             cats = [c for c in data.get("categories", []) if c in CATEGORIES] or base.categories
+            if len(set(cats) - {"general"}) > MAX_CATEGORIES:        # "everything" is not a categorisation
+                cats = base.categories
             variants = [v.strip() for v in data.get("variants", []) if isinstance(v, str) and v.strip()]
             budget = data.get("max_budget_pkr")
             base = QueryPlan(
@@ -75,6 +79,18 @@ def understand_query(query: str, settings: RunSettings, llm: LLM | None = None) 
             note = "llm"
         except (LLMError, ValueError, TypeError) as e:
             log.warning("Query LLM failed (%s); using heuristics", e)
+    # Guard: the LLM sometimes generalises ("samsung A06" -> product='smartphone'). Everything downstream
+    # (ranking, relevance rescue, later search rounds) uses the product/variants, so they must keep the model.
+    req = set(model_tokens(query))
+    if req:
+        def _has_model(text: str) -> bool:
+            return req <= set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+        if not _has_model(base.product):
+            log.info("LLM product %r lost the model %s; using the user's wording", base.product, sorted(req))
+            base.product = _heuristic(query).product
+            note += "+product-fixed"
+        base.variants = [v for v in base.variants if _has_model(v)]
     # Always keep the user's own wording first, then dedupe variants.
     seen, variants = set(), []
     for v in [query.strip(), base.product, *base.variants]:
@@ -89,5 +105,11 @@ def understand_query(query: str, settings: RunSettings, llm: LLM | None = None) 
     variants = drop_broader_variants(variants, base.product, keep=query)
     base.variants = variants[:6]
     if settings.categories:
-        base.categories = sorted(set(settings.categories) | {"general"})
+        chosen = set(settings.categories) - {"general"}
+        if len(chosen) > MAX_CATEGORIES:
+            # Nearly every category ticked = no real preference. Using them all would rank stores by trust score
+            # alone (fashion/grocery stores searched for a phone), so keep the categories detected from the query.
+            note += "+category-filter-ignored"
+        else:
+            base.categories = sorted(chosen | {"general"})
     return base, note
